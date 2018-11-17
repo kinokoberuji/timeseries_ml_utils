@@ -1,5 +1,6 @@
 from pandas_datareader import DataReader
 from fastdtw import fastdtw
+from typing import List, Dict
 import pandas as pd
 import numpy as np
 import os.path
@@ -80,6 +81,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         features, labels = self.__aggregate_normalized_window__(index)
 
+        # normalize data
+        # features[i] / features[i-1][-1]
+
         # de noise data
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         if self.de_noising is not None:
@@ -120,12 +124,14 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         # shape = (columns, lstm_memory_size + batch_size, window)
         features_range = range(i, i + self.lstm_memory_size + self.batch_size - self.forecast_horizon)
-        features = np.array([[df[column].iloc[j:j+window].values / ref for j in features_range]
+        features = np.array([[df[column].iloc[j:j+window].values / ref  # df[column].iloc[j] or 1.
+                              for j in features_range]
                              for column in self.features])
 
         # shape = (columns, lstm_memory_size + batch_size, window)
         labels_range = range(i + self.forecast_horizon, i + self.lstm_memory_size + self.batch_size)
-        labels = np.array([[df[column].iloc[j:j+window].values / ref for j in labels_range]
+        labels = np.array([[df[column].iloc[j:j+window].values / ref
+                            for j in labels_range]
                            for column in self.labels])
 
         return features, labels
@@ -165,11 +171,14 @@ class TestDataGenerator(AbstractDataGenerator):
             prediction = self.model.predict(features, batch_size=self.batch_size)
             print('\n', labels.shape, prediction.shape)
 
-            # calculate some kind of r² measure for each (label, prediction)
-            r2 = [self.r_square_like(labels[j], prediction[j])
-                  for j in range(len(prediction))]
+            try:
+                # calculate some kind of r² measure for each (label, prediction)
+                r2 = [self.r_square_like(labels[j], prediction[j])
+                      for j in range(len(prediction))]
 
-            self.accuracy["epoch"] = r2
+                self.accuracy["epoch"] = r2
+            except:
+                logging.error("error in accuracy estimation after epoch", sys.exc_info()[0])
 
     def r_square_like(self, x, y):
         prediction_distance = fastdtw(x, y)[0]
@@ -179,11 +188,11 @@ class TestDataGenerator(AbstractDataGenerator):
 
 class DataGenerator(AbstractDataGenerator):
 
-    def __init__(self, dataframe, features, labels,
+    def __init__(self, dataframe, features, labels: List[str],
                  batch_size=100, lstm_memory_size=52 * 5, aggregation_window_size=32,
                  training_percentage=0.8,
                  return_sequences = False,
-                 de_noising={".*": lambda x, feature_label_flag: x}, variances={".*": 0.94},
+                 de_noising={".*": lambda x, feature_label_flag: x}, variances: Dict[str, float]={".*": 0.94},
                  on_epoch_end_callback=lambda _: None):
         super(DataGenerator, self).__init__(add_sinusoidal_time(add_ewma_variance(dataframe, variances)),
                                             [col for col in dataframe.columns for f in features if re.search(f, col)],

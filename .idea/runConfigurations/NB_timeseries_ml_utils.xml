@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="timeseries_ml_utils" type="JupiterNotebook" factoryName="Jupyter Notebook">
+  <configuration default="false" name="NB timeseries_ml_utils" type="JupiterNotebook" factoryName="Jupyter Notebook">
     <module name="timeseries_ml_utils" />
     <option name="INTERPRETER_OPTIONS" value="" />
     <option name="PARENT_ENVS" value="true" />

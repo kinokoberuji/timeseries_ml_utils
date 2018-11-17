@@ -1,0 +1,8 @@
+keras
+fastdtw
+pandas
+numpy
+scipy
+tables
+matplotlib
+pandas-datareader
