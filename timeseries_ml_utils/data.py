@@ -1,5 +1,3 @@
-import sys
-
 from pandas_datareader import DataReader
 from fastdtw import fastdtw
 from typing import List, Dict, Callable
@@ -9,17 +7,26 @@ import os.path
 import logging
 import keras
 import math
+import sys
+import os
 import re
 
 
 class DataFetcher:
     '''Fetches data from the web into a pandas data frame and holds it in a file cache'''
 
-    def __init__(self, symbols, data_source="stooq", cache_path="/tmp"):
-        self.file_name = cache_path + '/' + '_'.join(symbols) + '.h5'
+    def __init__(self, symbols, data_source="stooq", limit=None, cache_path="./.cache"):
+        self.file_name = cache_path + '/' + '_'.join(symbols) + "." + data_source + "." + str(limit) + '.h5'
         self.symbols  = symbols
         self.data_source = data_source
+        self.limit = limit
         self.df_key = 'df'
+
+        if not os.path.exists(cache_path):
+            os.makedirs(cache_path)
+
+        if os.path.isfile(self.file_name):
+            os.remove(self.file_name)
 
     def fetch_data(self):
         df = pd.concat([DataReader(symbol, self.data_source).add_prefix(symbol + ".") for symbol in self.symbols],
@@ -28,11 +35,16 @@ class DataFetcher:
                .sort_index()
 
         df = df.dropna()
+
+        if self.limit is not None:
+            df = df.loc[df.index[-self.limit]:]
+
         df.to_hdf(self.file_name, key=self.df_key, mode='w')
         return df
 
     def get_dataframe(self):
         if not os.path.isfile(self.file_name):
+            logging.info("fetching data for " + self.file_name)
             self.fetch_data()
 
         return pd.read_hdf(self.file_name, self.df_key)
@@ -48,8 +60,8 @@ class AbstractDataGenerator(keras.utils.Sequence):
                  on_epoch_end_callback,
                  is_test):
         'Initialization'
-        logging.info("use features: " + ", ".join([f for f, _ in features]))
-        logging.info("use labels: " + ", ".join([l for l, _ in labels]))
+        logging.info("use features: " + ", ".join([f + " rescale: " + str(r) for f, r in features]))
+        logging.info("use labels: " + ", ".join([l + " rescale: " + str(r) for l, r in labels]))
         self.shuffle = False
         self.dataframe = dataframe.dropna()
         self.features = features
@@ -68,6 +80,10 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.length = len(self.dataframe) - self.batch_size - self.lstm_memory_size + 1 - self.aggregation_window_size + 1
         self.batch_feature_shape = self.__getitem__(0)[0].shape
         self.batch_label_shape = self.__getitem__(0)[1].shape
+
+        # sanity checks
+        if self.length < 1:
+            raise ValueError('Not enough Data for given memory and window sizes: ' + str(self.length))
 
     def __len__(self):
         'Denotes the number of batches per epoch'
@@ -179,19 +195,19 @@ class TestDataGenerator(AbstractDataGenerator):
         self.accuracy = pd.DataFrame({})
 
     def on_epoch_end(self):
+        print("print some accuracy function to tensorboard")
+
+    def relative_accuracy(self):
         for i in range(0, len(self), self.batch_size):
             features, labels = self.__getitem__(i)
             prediction = self.model.predict(features, batch_size=self.batch_size)
             print('\n', labels.shape, prediction.shape)
 
-            try:
-                # calculate some kind of r² measure for each (label, prediction)
-                r2 = [self.r_square_like(labels[j], prediction[j])
-                      for j in range(len(prediction))]
+            # calculate some kind of r² measure for each (label, prediction)
+            r2 = [self.r_square_like(labels[j], prediction[j])
+                  for j in range(len(prediction))]
 
-                self.accuracy["epoch"] = r2
-            except:
-                logging.error("error in accuracy estimation after epoch", sys.exc_info()[0])
+            self.accuracy["epoch"] = r2
 
     def r_square_like(self, x, y):
         prediction_distance = fastdtw(x, y)[0]
@@ -264,14 +280,14 @@ def add_ewma_variance(df: pd.DataFrame, param: float):
 
 
 def add_sinusoidal_time(df):
-    df["cos_dow"] = np.cos(2 * np.pi * df.index.dayofweek / 7)
-    df["sin_dow"] = np.sin(2 * np.pi * df.index.dayofweek / 7)
-    df["cos_woy"] = np.cos(2 * np.pi * df.index.week / 52)
-    df["sin_woy"] = np.sin(2 * np.pi * df.index.week / 52)
-    df["cos_doy"] = np.cos(2 * np.pi * df.index.dayofyear / 366)
-    df["sin_doy"] = np.sin(2 * np.pi * df.index.dayofyear / 366)
-    df["sin_yer"] = np.sin(2 * np.pi * (df.index.year - (df.index.year // 10) * 10) / 9)
-    df["cos_yer"] = np.cos(2 * np.pi * (df.index.year - (df.index.year // 10) * 10) / 9)
-    df["sin_dec"] = np.sin(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
-    df["cos_dec"] = np.cos(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
+    df["trigonometric_time.cos_dow"] = np.cos(2 * np.pi * df.index.dayofweek / 7)
+    df["trigonometric_time.sin_dow"] = np.sin(2 * np.pi * df.index.dayofweek / 7)
+    df["trigonometric_time.cos_woy"] = np.cos(2 * np.pi * df.index.week / 52)
+    df["trigonometric_time.sin_woy"] = np.sin(2 * np.pi * df.index.week / 52)
+    df["trigonometric_time.cos_doy"] = np.cos(2 * np.pi * df.index.dayofyear / 366)
+    df["trigonometric_time.sin_doy"] = np.sin(2 * np.pi * df.index.dayofyear / 366)
+    df["trigonometric_time.sin_yer"] = np.sin(2 * np.pi * (df.index.year - (df.index.year // 10) * 10) / 9)
+    df["trigonometric_time.cos_yer"] = np.cos(2 * np.pi * (df.index.year - (df.index.year // 10) * 10) / 9)
+    df["trigonometric_time.sin_dec"] = np.sin(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
+    df["trigonometric_time.cos_dec"] = np.cos(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
     return df

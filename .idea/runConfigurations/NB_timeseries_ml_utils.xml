@@ -11,7 +11,7 @@
     <option name="IS_MODULE_SDK" value="false" />
     <option name="ADD_CONTENT_ROOTS" value="true" />
     <option name="ADD_SOURCE_ROOTS" value="true" />
-    <option name="additionalOptions" value="--debug" />
+    <option name="additionalOptions" value="" />
     <option name="ipnbHost" value="127.0.0.1" />
     <option name="ipnbPort" value="8888" />
     <method v="2" />
