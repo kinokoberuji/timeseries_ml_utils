@@ -1,5 +1,8 @@
 /logs/
 /venv/
+.ipynb_checkpoints/
+.cache/
+.logs/
 .idea/misc.xml
 .idea/modules.xml
 .idea/timeseries_ml_utils.iml

@@ -195,24 +195,7 @@ class TestDataGenerator(AbstractDataGenerator):
         self.accuracy = pd.DataFrame({})
 
     def on_epoch_end(self):
-        print("print some accuracy function to tensorboard")
-
-    def relative_accuracy(self):
-        for i in range(0, len(self), self.batch_size):
-            features, labels = self.__getitem__(i)
-            prediction = self.model.predict(features, batch_size=self.batch_size)
-            print('\n', labels.shape, prediction.shape)
-
-            # calculate some kind of r² measure for each (label, prediction)
-            r2 = [self.r_square_like(labels[j], prediction[j])
-                  for j in range(len(prediction))]
-
-            self.accuracy["epoch"] = r2
-
-    def r_square_like(self, x, y):
-        prediction_distance = fastdtw(x, y)[0]
-        max_dist = len(y) * x.max()
-        return (max_dist - prediction_distance) / max_dist
+        pass
 
 
 class DataGenerator(AbstractDataGenerator):
