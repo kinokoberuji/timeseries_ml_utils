@@ -17,8 +17,8 @@ class TestTestDataGenerator(TestCase):
 
 
         # test case
-        data_generator = DataGenerator(df, ["GLD.US.Close$", "GLD.US.Volume$"], ["GLD.US.Close$"], 3, 4, 5,
-                                       training_percentage=0.6, return_sequences=False)
+        data_generator = DataGenerator(df, {"GLD.US.Close$": False, "GLD.US.Volume$": False}, {"GLD.US.Close$": False},
+                                       3, 4, 5, training_percentage=0.6, return_sequences=False)
 
         model = Sequential()
         model.add(LSTM(data_generator.batch_label_shape[-1],

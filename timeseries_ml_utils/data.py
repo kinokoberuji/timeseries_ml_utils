@@ -1,6 +1,8 @@
+import sys
+
 from pandas_datareader import DataReader
 from fastdtw import fastdtw
-from typing import List, Dict
+from typing import List, Dict, Callable
 import pandas as pd
 import numpy as np
 import os.path
@@ -46,8 +48,8 @@ class AbstractDataGenerator(keras.utils.Sequence):
                  on_epoch_end_callback,
                  is_test):
         'Initialization'
-        logging.info("use features: " + ", ".join(features))
-        logging.info("use labels: " + ", ".join(labels))
+        logging.info("use features: " + ", ".join([f for f, _ in features]))
+        logging.info("use labels: " + ", ".join([l for l, _ in labels]))
         self.shuffle = False
         self.dataframe = dataframe.dropna()
         self.features = features
@@ -82,12 +84,11 @@ class AbstractDataGenerator(keras.utils.Sequence):
         features, labels = self.__aggregate_normalized_window__(index)
 
         # normalize data
-        # features[i] / features[i-1][-1]
+        features, labels = self.__normalize__(index, features, labels)
 
         # de noise data
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        if self.de_noising is not None:
-            features, labels = self.__de_noise__(features, labels)
+        features, labels = self.__de_noise__(features, labels)
 
         # concatenate all feature and label vectors into one vector
         # shape = (lstm_memory_size + batch_size, window * feature/label_columns)
@@ -102,37 +103,49 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return np.array(features), np.array(labels)
 
-    def __de_noise__(self, features, labels):
-        feature_denoiser = {i: l if re.search(r, item) else lambda x: x
-                            for i, item in enumerate(self.features) for r, l in self.de_noising.items()}
-
-        label_denoiser = {i: l if re.search(r, item) else lambda x: x
-                          for i, item in enumerate(self.labels) for r, l in self.de_noising.items()}
-
-        features = np.array([d(features[i], 'F') for i, d in feature_denoiser.items()])
-        labels = np.array([d(labels[i], 'L') for i, d in label_denoiser.items()])
-
-        return features, labels
-
     def __aggregate_normalized_window__(self, i):
         # create data windows
         df = self.dataframe
         window = self.aggregation_window_size
 
-        # fixme fix ref value shape = {tuple} <class 'tuple'>: (5, 1, 4)
-        ref = 1
-
         # shape = (columns, lstm_memory_size + batch_size, window)
         features_range = range(i, i + self.lstm_memory_size + self.batch_size - self.forecast_horizon)
-        features = np.array([[df[column].iloc[j:j+window].values / ref  # df[column].iloc[j] or 1.
+        features = np.array([[df[column].iloc[j:j+window].values
                               for j in features_range]
-                             for column in self.features])
+                             for i, (column, rescale) in enumerate(self.features)])
 
         # shape = (columns, lstm_memory_size + batch_size, window)
         labels_range = range(i + self.forecast_horizon, i + self.lstm_memory_size + self.batch_size)
-        labels = np.array([[df[column].iloc[j:j+window].values / ref
+        labels = np.array([[df[column].iloc[j:j+window].values
                             for j in labels_range]
-                           for column in self.labels])
+                           for i, (column, rescale) in enumerate(self.labels)])
+
+        return features, labels
+
+    def __normalize__(self, index, features, labels):
+        df = self.dataframe
+
+        # shape = (feature / label_columns, lstm_memory_size + batch_size, window)
+        normalized_features = np.array([[(features[i][row] / df[col].iloc[max(0, index + row - 1)] if rescale else features[i][row])
+                                         for row in (range(features.shape[1]))]
+                                        for i, (col, rescale) in enumerate(self.features)])
+
+        normalized_labels = np.array([[(labels[i][row] / df[col].iloc[max(0, index + self.forecast_horizon + row - 1)] if rescale else labels[i][row])
+                                       for row in (range(labels.shape[1]))]
+                                      for i, (col, rescale) in enumerate(self.labels)])
+
+        return normalized_features, normalized_labels
+
+    def __de_noise__(self, features, labels):
+        if self.de_noising is not None:
+            feature_denoiser = {i: l if re.search(r, item) else lambda x: x
+                                for i, (item, rescale) in enumerate(self.features) for r, l in self.de_noising.items()}
+
+            label_denoiser = {i: l if re.search(r, item) else lambda x: x
+                              for i, (item, rescale) in enumerate(self.labels) for r, l in self.de_noising.items()}
+
+            features = np.array([d(features[i], 'F') for i, d in feature_denoiser.items()])
+            labels = np.array([d(labels[i], 'L') for i, d in label_denoiser.items()])
 
         return features, labels
 
@@ -188,15 +201,17 @@ class TestDataGenerator(AbstractDataGenerator):
 
 class DataGenerator(AbstractDataGenerator):
 
-    def __init__(self, dataframe, features, labels: List[str],
-                 batch_size=100, lstm_memory_size=52 * 5, aggregation_window_size=32,
-                 training_percentage=0.8,
-                 return_sequences = False,
-                 de_noising={".*": lambda x, feature_label_flag: x}, variances: Dict[str, float]={".*": 0.94},
+    def __init__(self, dataframe,
+                 features: Dict[str, bool], labels: Dict[str, bool],
+                 batch_size: int=100, lstm_memory_size: int=52 * 5, aggregation_window_size: int=32,
+                 training_percentage: float=0.8,
+                 return_sequences: bool=False,
+                 de_noising: Dict[str, Callable[[np.ndarray, str], np.ndarray]]={".*": lambda x, feature_label_flag: x},
+                 variances: Dict[str, float]={".*": 0.94},
                  on_epoch_end_callback=lambda _: None):
         super(DataGenerator, self).__init__(add_sinusoidal_time(add_ewma_variance(dataframe, variances)),
-                                            [col for col in dataframe.columns for f in features if re.search(f, col)],
-                                            [col for col in dataframe.columns for f in labels if re.search(f, col)],
+                                            [(col, r) for col in dataframe.columns for f, r in features.items() if re.search(f, col)],
+                                            [(col, r) for col in dataframe.columns for l, r in labels.items() if re.search(l, col)],
                                             batch_size,
                                             lstm_memory_size,
                                             aggregation_window_size,
@@ -208,11 +223,29 @@ class DataGenerator(AbstractDataGenerator):
 
         super(DataGenerator, self).on_epoch_end()
 
-    def as_test_data_generator(self, model=None):
+    @classmethod
+    def from_datafetcher(cls, datafetcher: DataFetcher,
+                         features: Dict[str, bool], labels: Dict[str, bool],
+                         batch_size: int=100, lstm_memory_size: int=52 * 5, aggregation_window_size: int=32,
+                         training_percentage: float=0.8,
+                         return_sequences: bool=False,
+                         de_noising: Dict[str, Callable[[np.ndarray, str], np.ndarray]]={".*": lambda x, feature_label_flag: x},
+                         variances: Dict[str, float]={".*": 0.94},
+                         on_epoch_end_callback=lambda _: None):
+        cls(datafetcher.get_dataframe(),
+            features, labels,
+            batch_size, lstm_memory_size, aggregation_window_size,
+            training_percentage,
+            return_sequences,
+            de_noising,
+            variances,
+            on_epoch_end_callback)
+
+    def as_test_data_generator(self, model: keras.Model=None) -> TestDataGenerator:
         return TestDataGenerator(self, model)
 
 
-def add_ewma_variance(df, param):
+def add_ewma_variance(df: pd.DataFrame, param: float):
     for rx, l in param.items():
         for col in df.columns:
             if re.search(rx, col):
