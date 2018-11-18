@@ -3,11 +3,14 @@ from keras.callbacks import Callback
 from typing import Callable
 from fastdtw import fastdtw
 import numpy as np
+import asciichartpy as ascii
 
 
 def relative_dtw(x, y):
-    prediction_distance = fastdtw(x, y)[0]
-    max_dist = len(y) * x.max()
+    x1 = x + 1
+    y1 = y + 1
+    prediction_distance = fastdtw(x1, y1)[0]
+    max_dist = max(len(y) * x1.max(), len(y) * y1.max())
     return (max_dist - prediction_distance) / max_dist
 
 
@@ -24,6 +27,7 @@ def ascii_hist(x, bins):
 
 
 class RelativeAccuracy(Callback):
+    # see: https://keunwoochoi.wordpress.com/2016/07/16/keras-callbacks/
 
     def __init__(self,
                  data_generator: TestDataGenerator,
@@ -35,33 +39,46 @@ class RelativeAccuracy(Callback):
         self.model = None
         self.params = None
         self.r2 = None
+        self.worst_sample = None
 
     def set_model(self, model):
         self.model = model
 
     def on_batch_end(self, batch, logs=None):
         if self.frequency > 0 and batch % self.frequency == 0:
-            self.r2 = self.relative_accuracy()
+            self.r2, _ = self.relative_accuracy()
             print('\n', np.histogram(self.r2)[1], '\n')
             # TODO i would like to tensorboard print it here
 
     def on_epoch_end(self, epoch, logs=None):
-        self.r2 = self.relative_accuracy()
-        # TODO store one label and prediction array for each bin so that we can plot it against each other
+        self.r2, _ = self.relative_accuracy()
+        print('\n', np.histogram(self.r2)[1], '\n')
+
+    def on_train_end(self, logs=None):
+        self.r2, self.worst_sample = self.relative_accuracy()
         ascii_hist(self.r2, 10)
+        # ascii.plot()
 
     def relative_accuracy(self):
         r2 = np.array([])
+        r2_batch = np.array([])
         batch_size = self.data_generator.batch_size
+
         for i in range(0, len(self.data_generator), batch_size):
             features, labels = self.data_generator.__getitem__(i)
             prediction = self.model.predict(features, batch_size=batch_size)
 
             # calculate some kind of r² measure for each (label, prediction)
-            r2 = np.hstack([r2, [self.relative_accuracy_function(labels[j], prediction[j])
-                                 for j in range(len(prediction))]])
+            r2_batch = np.array([self.relative_accuracy_function(labels[j], prediction[j]) for j in range(len(prediction))])
+            r2 = np.hstack([r2, r2_batch])
+
+        min_index = np.argmin(r2_batch)
+        max_index = np.argmax(r2_batch)
 
         # now we have the similarity for each sample in all batches
-        return r2
-
+        return r2, {"label_" + str(r2_batch.min()): labels[min_index],
+                    "prediction_" + str(r2_batch.min()): prediction[min_index],
+                    "label_" + str(r2_batch.max()): labels[max_index],
+                    "prediction_" + str(r2_batch.max()): prediction[max_index]
+                    }
 

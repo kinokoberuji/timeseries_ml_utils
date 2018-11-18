@@ -142,11 +142,11 @@ class AbstractDataGenerator(keras.utils.Sequence):
         df = self.dataframe
 
         # shape = (feature / label_columns, lstm_memory_size + batch_size, window)
-        normalized_features = np.array([[(features[i][row] / df[col].iloc[max(0, index + row - 1)] if rescale else features[i][row])
+        normalized_features = np.array([[(features[i][row] / df[col].iloc[max(0, index + row - 1)]) -1 if rescale else features[i][row]
                                          for row in (range(features.shape[1]))]
                                         for i, (col, rescale) in enumerate(self.features)])
 
-        normalized_labels = np.array([[(labels[i][row] / df[col].iloc[max(0, index + self.forecast_horizon + row - 1)] if rescale else labels[i][row])
+        normalized_labels = np.array([[(labels[i][row] / df[col].iloc[max(0, index + self.forecast_horizon + row - 1)]) -1 if rescale else labels[i][row]
                                        for row in (range(labels.shape[1]))]
                                       for i, (col, rescale) in enumerate(self.labels)])
 

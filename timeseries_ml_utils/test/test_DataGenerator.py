@@ -75,10 +75,14 @@ class TestDataGenerator(TestCase):
         first_batch = data_generator.__getitem__(0)
         last_batch = data_generator.__getitem__(last_index)
 
-        np.testing.assert_array_almost_equal(first_batch[0][0][0], np.array([2/2,3/2,4/2,5/2,6/2, 2,3,4,5,6]), 4)
-        np.testing.assert_array_almost_equal(first_batch[1][0][0], np.array([3/2,4/2,5/2,6/2,7/2]), 4)
+        x = np.array([2,3,4,5,6])
+        y = np.array([3,4,5,6,7])
+        np.testing.assert_array_almost_equal(first_batch[0][0][0], np.hstack([x / 2 - 1, x]), 4)
+        np.testing.assert_array_almost_equal(first_batch[1][0][0], y / 2 - 1, 4)
 
-        np.testing.assert_array_almost_equal(last_batch[0][-1][-1], np.array([15/14,16/14,17/14,18/14,19/14, 15,16,17,18,19]), 4)
-        np.testing.assert_array_almost_equal(last_batch[1][-1][-1],  np.array([16/15,17/15,18/15,19/15,20/15]), 4)
+        x = np.array([15,16,17,18,19])
+        y = np.array([16,17,18,19,20])
+        np.testing.assert_array_almost_equal(last_batch[0][-1][-1], np.hstack([x / 14 - 1, x]), 4)
+        np.testing.assert_array_almost_equal(last_batch[1][-1][-1], y / 15 - 1, 4)
 
 

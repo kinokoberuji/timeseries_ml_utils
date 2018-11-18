@@ -1,3 +1,4 @@
+asciichartpy
 keras
 fastdtw
 pandas
