@@ -104,7 +104,7 @@ class TestDataGenerator(TestCase):
         np.testing.assert_array_almost_equal(last_batch[0][-1][-1], np.hstack([x / 6 - 1, x]), 4)
         np.testing.assert_array_almost_equal(last_batch[1][-1][-1], y / 13 - 1, 4)
 
-    def test__jst_enough_data(self):
+    def test__just_enough_data(self):
         pd.options.display.max_columns = None
 
         df = pd.DataFrame({
@@ -121,3 +121,36 @@ class TestDataGenerator(TestCase):
 
         np.testing.assert_array_almost_equal(first_batch[0], last_batch[0], 4)
         np.testing.assert_array_almost_equal(first_batch[1], last_batch[1], 4)
+
+    def test__only_one_feature(self):
+        pd.options.display.max_columns = None
+
+        df = pd.DataFrame({
+            "GLD.US.Volume": np.arange(18.0) + 2.0  # prevent division by 0 or 1
+        }, index=pd.date_range(start='01.01.2015', periods=18))
+
+        data_generator = DataGenerator(df, {"GLD.US.Volume$": False}, {"GLD.US.Volume$": False},
+                                       2, 2, 7, 7, training_percentage=1.0, return_sequences=True)
+
+        last_index = len(data_generator) - 1
+        last_batch = data_generator.__getitem__(last_index)
+
+        self.assertEqual(last_batch[0].shape, (2,2,7))
+        self.assertEqual(last_batch[1].shape, (2,2,7))
+
+    def test__not_enough_data(self):
+        pd.options.display.max_columns = None
+
+        df = pd.DataFrame({
+            "GLD.US.Volume": np.arange(18.0) + 2.0  # prevent division by 0 or 1
+        }, index=pd.date_range(start='01.01.2015', periods=18))
+
+        try:
+            data_generator = DataGenerator(df, {"GLD.US.Volume$": False}, {"GLD.US.Volume$": False},
+                                           2, 2, 9, 9, training_percentage=1.0, return_sequences=True)
+        except ValueError:
+            self.assertTrue(True)
+        else:
+            self.assertTrue(False)
+
+

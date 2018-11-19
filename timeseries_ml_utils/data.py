@@ -78,12 +78,13 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         # derived properties
         self.length = len(self.dataframe) - self.batch_size - self.lstm_memory_size + 1 - self.aggregation_window_size + 1 - self.forecast_horizon + 1
-        self.batch_feature_shape = self.__getitem__(0)[0].shape
-        self.batch_label_shape = self.__getitem__(0)[1].shape
 
         # sanity checks
         if self.length < 1:
             raise ValueError('Not enough Data for given memory and window sizes: ' + str(self.length))
+
+        self.batch_feature_shape = self.__getitem__(0)[0].shape
+        self.batch_label_shape = self.__getitem__(0)[1].shape
 
     def __len__(self):
         'Denotes the number of batches per epoch'
