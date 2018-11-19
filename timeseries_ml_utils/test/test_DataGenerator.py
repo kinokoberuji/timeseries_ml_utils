@@ -18,7 +18,7 @@ class TestDataGenerator(TestCase):
         }, index=pd.date_range(start='01.01.2015', periods=19))
 
         data_generator = DataGenerator(df, {"GLD.US.Close$": False, "GLD.US.Volume$": False}, {"GLD.US.Close$": False},
-                                       3, 4, 5, training_percentage=0.6, return_sequences=True)
+                                       3, 4, 5, 1, training_percentage=0.6, return_sequences=True)
         last_index = len(data_generator) - 1
 
         print("\n", data_generator.dataframe)
@@ -69,7 +69,7 @@ class TestDataGenerator(TestCase):
         }, index=pd.date_range(start='01.01.2015', periods=19))
 
         data_generator = DataGenerator(df, {"GLD.US.Close$": True, "GLD.US.Volume$": False}, {"GLD.US.Close$": True},
-                                       3, 4, 5, training_percentage=1.0, return_sequences=True)
+                                       3, 4, 5, 1, training_percentage=1.0, return_sequences=True)
 
         last_index = len(data_generator) - 1
         first_batch = data_generator.__getitem__(0)
@@ -85,4 +85,39 @@ class TestDataGenerator(TestCase):
         np.testing.assert_array_almost_equal(last_batch[0][-1][-1], np.hstack([x / 14 - 1, x]), 4)
         np.testing.assert_array_almost_equal(last_batch[1][-1][-1], y / 15 - 1, 4)
 
+    def test__forecast_horizon(self):
+        pd.options.display.max_columns = None
 
+        df = pd.DataFrame({
+            "GLD.US.Close": np.arange(19.0) + 2.0,   # prevent division by 0 or 1
+            "GLD.US.Volume": np.arange(19.0) + 2.0,  # prevent division by 0 or 1
+        }, index=pd.date_range(start='01.01.2015', periods=19))
+
+        data_generator = DataGenerator(df, {"GLD.US.Close$": True, "GLD.US.Volume$": False}, {"GLD.US.Close$": True},
+                                       2, 2, 7, 7, training_percentage=1.0, return_sequences=True)
+
+        last_index = len(data_generator) - 1
+        last_batch = data_generator.__getitem__(last_index)
+
+        x = np.array([ 7, 8, 9,10,11,12,13])
+        y = np.array([14,15,16,17,18,19,20])
+        np.testing.assert_array_almost_equal(last_batch[0][-1][-1], np.hstack([x / 6 - 1, x]), 4)
+        np.testing.assert_array_almost_equal(last_batch[1][-1][-1], y / 13 - 1, 4)
+
+    def test__jst_enough_data(self):
+        pd.options.display.max_columns = None
+
+        df = pd.DataFrame({
+            "GLD.US.Close": np.arange(18.0) + 2.0,   # prevent division by 0 or 1
+            "GLD.US.Volume": np.arange(18.0) + 2.0,  # prevent division by 0 or 1
+        }, index=pd.date_range(start='01.01.2015', periods=18))
+
+        data_generator = DataGenerator(df, {"GLD.US.Close$": False, "GLD.US.Volume$": False}, {"GLD.US.Close$": True},
+                                       1, 1, 9, 9, training_percentage=1.0, return_sequences=True)
+
+        last_index = len(data_generator) - 1
+        first_batch = data_generator.__getitem__(0)
+        last_batch = data_generator.__getitem__(last_index)
+
+        np.testing.assert_array_almost_equal(first_batch[0], last_batch[0], 4)
+        np.testing.assert_array_almost_equal(first_batch[1], last_batch[1], 4)

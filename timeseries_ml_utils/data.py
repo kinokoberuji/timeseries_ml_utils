@@ -54,7 +54,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
     'Generates data for Keras'
 
     def __init__(self, dataframe, features, labels,
-                 batch_size, lstm_memory_size, aggregation_window_size,
+                 batch_size, lstm_memory_size, aggregation_window_size, forecast_horizon,
                  de_noising, training_percentage,
                  return_sequences,
                  on_epoch_end_callback,
@@ -70,14 +70,14 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.lstm_memory_size = lstm_memory_size
         self.aggregation_window_size = aggregation_window_size
         self.de_noising = de_noising
-        self.forecast_horizon = 1
+        self.forecast_horizon = forecast_horizon
         self.training_percentage = training_percentage
         self.return_sequences = return_sequences
         self.on_epoch_end_callback = on_epoch_end_callback
         self.is_test = is_test
 
         # derived properties
-        self.length = len(self.dataframe) - self.batch_size - self.lstm_memory_size + 1 - self.aggregation_window_size + 1
+        self.length = len(self.dataframe) - self.batch_size - self.lstm_memory_size + 1 - self.aggregation_window_size + 1 - self.forecast_horizon + 1
         self.batch_feature_shape = self.__getitem__(0)[0].shape
         self.batch_label_shape = self.__getitem__(0)[1].shape
 
@@ -125,13 +125,13 @@ class AbstractDataGenerator(keras.utils.Sequence):
         window = self.aggregation_window_size
 
         # shape = (columns, lstm_memory_size + batch_size, window)
-        features_range = range(i, i + self.lstm_memory_size + self.batch_size - self.forecast_horizon)
+        features_range = range(i, i + self.lstm_memory_size + self.batch_size - 1)
         features = np.array([[df[column].iloc[j:j+window].values
                               for j in features_range]
                              for i, (column, rescale) in enumerate(self.features)])
 
         # shape = (columns, lstm_memory_size + batch_size, window)
-        labels_range = range(i + self.forecast_horizon, i + self.lstm_memory_size + self.batch_size)
+        labels_range = range(i + self.forecast_horizon, i + self.lstm_memory_size + self.batch_size + self.forecast_horizon - 1)
         labels = np.array([[df[column].iloc[j:j+window].values
                             for j in labels_range]
                            for i, (column, rescale) in enumerate(self.labels)])
@@ -166,6 +166,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         return features, labels
 
     def __concatenate_vectors__(self, array3D):
+        # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         return array3D.transpose((1, 0, 2)) \
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
 
@@ -186,6 +187,7 @@ class TestDataGenerator(AbstractDataGenerator):
                                                 datagenerator.batch_size,
                                                 datagenerator.lstm_memory_size,
                                                 datagenerator.aggregation_window_size,
+                                                datagenerator.forecast_horizon,
                                                 datagenerator.de_noising,
                                                 datagenerator.training_percentage,
                                                 datagenerator.return_sequences,
@@ -202,7 +204,7 @@ class DataGenerator(AbstractDataGenerator):
 
     def __init__(self, dataframe,
                  features: Dict[str, bool], labels: Dict[str, bool],
-                 batch_size: int=100, lstm_memory_size: int=52 * 5, aggregation_window_size: int=32,
+                 batch_size: int=100, lstm_memory_size: int=52 * 5, aggregation_window_size: int=32, forecast_horizon: int=None,
                  training_percentage: float=0.8,
                  return_sequences: bool=False,
                  de_noising: Dict[str, Callable[[np.ndarray, str], np.ndarray]]={".*": lambda x, feature_label_flag: x},
@@ -214,6 +216,7 @@ class DataGenerator(AbstractDataGenerator):
                                             batch_size,
                                             lstm_memory_size,
                                             aggregation_window_size,
+                                            aggregation_window_size if forecast_horizon is None else forecast_horizon,
                                             de_noising,
                                             training_percentage,
                                             return_sequences,
