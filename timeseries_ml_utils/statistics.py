@@ -1,5 +1,6 @@
 from timeseries_ml_utils.data import TestDataGenerator
 from keras.callbacks import Callback
+from keras import backend as K
 from typing import Callable
 from fastdtw import fastdtw
 import numpy as np
@@ -12,6 +13,17 @@ def relative_dtw(x, y):
     prediction_distance = fastdtw(x1, y1)[0]
     max_dist = max(len(y) * x1.max(), len(y) * y1.max())
     return (max_dist - prediction_distance) / max_dist
+
+
+def r_square(x, y):
+    x1 = x + 1
+    y1 = y + 1
+    x1_bar = x1.mean()
+    return 1 - np.sum((x1 - y1) ** 2) / np.sum((x1 - x1_bar) ** 2)
+
+
+def relative_dtw_times_r2(x, y):
+    return relative_dtw(x, y) * r_square(x, y)
 
 
 def ascii_hist(x, bins):
@@ -43,12 +55,14 @@ class RelativeAccuracy(Callback):
 
     def set_model(self, model):
         self.model = model
+        if K.backend() == 'tensorflow':
+            self.sess = K.get_session()
 
     def on_batch_end(self, batch, logs=None):
         if self.frequency > 0 and batch % self.frequency == 0:
             self.r2, _ = self.relative_accuracy()
             print('\n', np.histogram(self.r2)[1], '\n')
-            # TODO i would like to tensorboard print it here
+            # TODO i would like to tensorboard print it here like so: https://stackoverflow.com/a/48876774/1298461
 
     def on_epoch_end(self, epoch, logs=None):
         self.r2, _ = self.relative_accuracy()

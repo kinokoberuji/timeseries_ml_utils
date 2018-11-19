@@ -49,6 +49,11 @@ class DataFetcher:
 
         return pd.read_hdf(self.file_name, self.df_key)
 
+    @classmethod
+    def from_dataframes(cls, dataframes: List[pd.DataFrame]):
+        # FIXME implement DataFetcher.from_dataframe
+        pass
+
 
 class AbstractDataGenerator(keras.utils.Sequence):
     'Generates data for Keras'
@@ -76,13 +81,22 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.on_epoch_end_callback = on_epoch_end_callback
         self.is_test = is_test
 
-        # derived properties
+        # calculate length
         self.length = len(self.dataframe) - self.batch_size - self.lstm_memory_size + 1 - self.aggregation_window_size + 1 - self.forecast_horizon + 1
 
         # sanity checks
+        if len(self.labels) < 1:
+            raise ValueError('No labels defined')
+        if len(self.features) < 1:
+            raise ValueError('No features defined')
+        if self.forecast_horizon < 1:
+            raise ValueError('Forecast horizon needs to be >= 1')
+        if self.aggregation_window_size < 1:
+            raise ValueError('Aggregation window needs to be >= 1')
         if self.length < 1:
             raise ValueError('Not enough Data for given memory and window sizes: ' + str(self.length))
 
+        # derived properties
         self.batch_feature_shape = self.__getitem__(0)[0].shape
         self.batch_label_shape = self.__getitem__(0)[1].shape
 
@@ -203,7 +217,7 @@ class TestDataGenerator(AbstractDataGenerator):
 
 class DataGenerator(AbstractDataGenerator):
 
-    def __init__(self, dataframe,
+    def __init__(self, dataframe,  # FIXME provide a DataFetcher and use a classmethod on the DataFetcher instead
                  features: Dict[str, bool], labels: Dict[str, bool],
                  batch_size: int=100, lstm_memory_size: int=52 * 5, aggregation_window_size: int=32, forecast_horizon: int=None,
                  training_percentage: float=0.8,
@@ -226,26 +240,16 @@ class DataGenerator(AbstractDataGenerator):
 
         super(DataGenerator, self).on_epoch_end()
 
-    @classmethod
-    def from_datafetcher(cls, datafetcher: DataFetcher,
-                         features: Dict[str, bool], labels: Dict[str, bool],
-                         batch_size: int=100, lstm_memory_size: int=52 * 5, aggregation_window_size: int=32,
-                         training_percentage: float=0.8,
-                         return_sequences: bool=False,
-                         de_noising: Dict[str, Callable[[np.ndarray, str], np.ndarray]]={".*": lambda x, feature_label_flag: x},
-                         variances: Dict[str, float]={".*": 0.94},
-                         on_epoch_end_callback=lambda _: None):
-        cls(datafetcher.get_dataframe(),
-            features, labels,
-            batch_size, lstm_memory_size, aggregation_window_size,
-            training_percentage,
-            return_sequences,
-            de_noising,
-            variances,
-            on_epoch_end_callback)
-
     def as_test_data_generator(self, model: keras.Model=None) -> TestDataGenerator:
         return TestDataGenerator(self, model)
+
+    def predict(self, model: keras.Model, index: int):
+        # TODO get the feature as index and predict the labels
+        # TODO decode eventually encoded (denoised) vectors
+        # TODO scale back to original domain
+        # TODO if labels present make a comparing output else use just the prediction, later we could make a back-test
+        # TODO add some kind of confidence interval around the prediction
+        pass
 
 
 def add_ewma_variance(df: pd.DataFrame, param: float):
