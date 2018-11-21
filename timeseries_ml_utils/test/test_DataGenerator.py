@@ -26,8 +26,8 @@ class TestDataGenerator(TestCase):
         first_batch = data_generator.__getitem__(0)
 
         # assert window aggregation
-        self.assertEqual(data_generator.__aggregate_normalized_window__(last_index)[0][-1][-1][-1], 13.)
-        self.assertEqual(data_generator.__aggregate_normalized_window__(last_index)[1][-1][-1][-1], 14.)
+        self.assertEqual(data_generator._aggregate_normalized_window(last_index)[0][-1][-1][-1], 13.)
+        self.assertEqual(data_generator._aggregate_normalized_window(last_index)[1][-1][-1][-1], 14.)
 
         # assert first batch
         self.assertEqual(data_generator.__getitem__(0)[0][0][0][0], 0.)

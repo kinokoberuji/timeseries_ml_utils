@@ -1,6 +1,8 @@
 from io import BytesIO
-import numpy as np
+from typing import List
 
+import numpy as np
+import matplotlib.pyplot as plt
 
 class TensorboardLogger(object):
     """Logging in tensorboard without tensorflow ops."""
@@ -31,22 +33,26 @@ class TensorboardLogger(object):
                                                      simple_value=value)])
         self.writer.add_summary(summary, step)
 
-    def log_images(self, tag, images, step):
-        """Logs a list of images."""
+    def log_plots(self, tag, figures: List[plt.Figure], step):
+        """Logs a plot as image."""
 
         im_summaries = []
-        for nr, img in enumerate(images):
+        for nr, fig in enumerate(figures):
             # Write the image to a string
-            s = BytesIO()
-            #plt.imsave(s, img, format='png')
+            buf = BytesIO()
+            fig.savefig(buf, format='png', quality=10)
+            width, height = fig.get_size_inches() * fig.dpi
 
             # Create an Image object
-            img_sum = tf.Summary.Image(encoded_image_string=s.getvalue(),
-                                       height=img.shape[0],
-                                       width=img.shape[1])
+            img_sum = tf.Summary.Image(encoded_image_string=buf.getvalue(),
+                                       height=int(height),
+                                       width=int(width))
             # Create a Summary value
             im_summaries.append(tf.Summary.Value(tag='%s/%d' % (tag, nr),
                                                  image=img_sum))
+
+            # close buffer
+            buf.close()
 
         # Create and write Summary
         summary = tf.Summary(value=im_summaries)

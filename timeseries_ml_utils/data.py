@@ -112,19 +112,19 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         # aggregate windows
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        features, labels = self.__aggregate_normalized_window__(index)
+        features, labels = self._aggregate_normalized_window(index)
 
         # normalize data
-        features, labels = self.__normalize__(index, features, labels)
+        features, labels = self._normalize(index, features, labels)
 
         # de noise data
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        features, labels = self.__de_noise__(features, labels)
+        features, labels = self._de_noise(features, labels)
 
         # concatenate all feature and label vectors into one vector
         # shape = (lstm_memory_size + batch_size, window * feature/label_columns)
-        features = self.__concatenate_vectors__(features)
-        labels = self.__concatenate_vectors__(labels)
+        features = self.__concatenate_vectors(features)
+        labels = self.__concatenate_vectors(labels)
 
         # make sliding window of lstm_memory_size
         # shape = (batchsize, lstm_memory_size, window * feature/label_columns)
@@ -134,7 +134,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return np.array(features), np.array(labels)
 
-    def __aggregate_normalized_window__(self, i):
+    def _aggregate_normalized_window(self, i):
         # create data windows
         df = self.dataframe
         window = self.aggregation_window_size
@@ -153,7 +153,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return features, labels
 
-    def __normalize__(self, index, features, labels):
+    def _normalize(self, index, features, labels):
         df = self.dataframe
 
         # shape = (feature / label_columns, lstm_memory_size + batch_size, window)
@@ -167,7 +167,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return normalized_features, normalized_labels
 
-    def __de_noise__(self, features, labels):
+    def _de_noise(self, features, labels):
         if self.de_noising is not None:
             feature_denoiser = {i: l if re.search(r, item) else lambda x: x
                                 for i, (item, rescale) in enumerate(self.features) for r, l in self.de_noising.items()}
@@ -180,7 +180,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return features, labels
 
-    def __concatenate_vectors__(self, array3D):
+    def __concatenate_vectors(self, array3D):
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         return array3D.transpose((1, 0, 2)) \
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
