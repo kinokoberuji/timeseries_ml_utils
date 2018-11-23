@@ -1,12 +1,12 @@
+import os
+from unittest import TestCase
 from unittest.mock import Mock
 
+import numpy as np
 import pandas as pd
 
-import numpy as np
-from unittest import TestCase, mock
-
-from timeseries_ml_utils.data import DataGenerator
-from timeseries_ml_utils.statistics import RelativeAccuracy
+from ..callbacks import RelativeAccuracy
+from ..data import DataGenerator
 
 
 class TestRelativeAccuracy(TestCase):
@@ -24,6 +24,15 @@ class TestRelativeAccuracy(TestCase):
         model.predict = Mock(return_value=data_generator.__getitem__(1)[1] + .2)
         pd.options.display.max_columns = None
 
-        acc = RelativeAccuracy(data_generator)
+        acc = RelativeAccuracy(data_generator, log_dir="./.test_on_train_end")
         acc.set_model(model)
-        acc.on_train_end()
+        size = -1
+
+        try:
+            acc.on_train_end()
+            file = os.path.join(acc.log_dir, os.listdir(acc.log_dir)[0])
+            size = os.path.getsize(file)
+        finally:
+            acc.clear_all_logs()
+
+        self.assertAlmostEqual(123453, size)

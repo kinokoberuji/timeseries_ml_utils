@@ -1,15 +1,15 @@
 from pandas_datareader import DataReader
-from fastdtw import fastdtw
 from typing import List, Dict, Callable
 import pandas as pd
 import numpy as np
 import os.path
 import logging
 import keras
-import math
-import sys
 import os
 import re
+
+from .callbacks import RelativeAccuracy
+from .statistics import add_ewma_variance, add_sinusoidal_time, relative_dtw
 
 
 class DataFetcher:
@@ -211,6 +211,22 @@ class TestDataGenerator(AbstractDataGenerator):
         self.model = model
         self.accuracy = pd.DataFrame({})
 
+    def predict(self, model: keras.Model, index: int):
+        # TODO get the feature as index and predict the labels
+        # TODO decode eventually encoded (denoised) vectors
+        # TODO scale back to original domain
+        # TODO if labels present make a comparing output else use just the prediction, later we could make a back-test
+        # TODO add some kind of confidence interval around the prediction
+        pass
+
+    def get_keras_callback(self,
+                           relative_accuracy_function: Callable[[np.ndarray, np.ndarray], np.ndarray]=relative_dtw,
+                           frequency: int=50,
+                           log_dir="./.logs"):
+        # TODO return the callback we prepared and feed back the statistics like stddev of each predicted label
+        callback = RelativeAccuracy(self, relative_accuracy_function, frequency, log_dir)
+        return callback
+
     def on_epoch_end(self):
         pass
 
@@ -242,43 +258,3 @@ class DataGenerator(AbstractDataGenerator):
 
     def as_test_data_generator(self, model: keras.Model=None) -> TestDataGenerator:
         return TestDataGenerator(self, model)
-
-    def predict(self, model: keras.Model, index: int):
-        # TODO get the feature as index and predict the labels
-        # TODO decode eventually encoded (denoised) vectors
-        # TODO scale back to original domain
-        # TODO if labels present make a comparing output else use just the prediction, later we could make a back-test
-        # TODO add some kind of confidence interval around the prediction
-        pass
-
-
-def add_ewma_variance(df: pd.DataFrame, param: float):
-    for rx, l in param.items():
-        for col in df.columns:
-            if re.search(rx, col):
-                arr = df[col].pct_change().values
-                all_var = []
-                var = 0
-
-                for i in range(len(arr)):
-                    v = l * var + (1 - l) * arr[i] ** 2
-                    var = 0 if math.isnan(v) or math.isinf(v) else v
-                    all_var.append(var)
-
-                df[col + "_variance"] = all_var
-
-    return df
-
-
-def add_sinusoidal_time(df):
-    df["trigonometric_time.cos_dow"] = np.cos(2 * np.pi * df.index.dayofweek / 7)
-    df["trigonometric_time.sin_dow"] = np.sin(2 * np.pi * df.index.dayofweek / 7)
-    df["trigonometric_time.cos_woy"] = np.cos(2 * np.pi * df.index.week / 52)
-    df["trigonometric_time.sin_woy"] = np.sin(2 * np.pi * df.index.week / 52)
-    df["trigonometric_time.cos_doy"] = np.cos(2 * np.pi * df.index.dayofyear / 366)
-    df["trigonometric_time.sin_doy"] = np.sin(2 * np.pi * df.index.dayofyear / 366)
-    df["trigonometric_time.sin_yer"] = np.sin(2 * np.pi * (df.index.year - (df.index.year // 10) * 10) / 9)
-    df["trigonometric_time.cos_yer"] = np.cos(2 * np.pi * (df.index.year - (df.index.year // 10) * 10) / 9)
-    df["trigonometric_time.sin_dec"] = np.sin(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
-    df["trigonometric_time.cos_dec"] = np.cos(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
-    return df
