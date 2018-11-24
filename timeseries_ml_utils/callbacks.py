@@ -1,4 +1,5 @@
 import itertools as it
+import math
 from datetime import datetime
 from shutil import rmtree
 
@@ -43,55 +44,74 @@ class RelativeAccuracy(Callback):
 
     def on_batch_end(self, batch, logs=None):
         if self.frequency > 0 and batch > 0 and batch % self.frequency == 0:
-            self.r2, _ = self._relative_accuracy()
+            self.r2, _, _, _, _ = self._relative_accuracy()
             self._log_histogram()
 
         for tag, val in logs.items():
             self.tensorboard.log_scalar(tag, val, next(self.log_scalar_step))
 
     def on_epoch_end(self, epoch, logs=None):
-        self.r2, _ = self._relative_accuracy()
+        self.r2, _, _, _, _ = self._relative_accuracy()
         self._log_histogram()
 
     def on_train_end(self, logs=None):
-        self.r2, samples = self._relative_accuracy()
+        self.r2, features, labels, predictions, errors = self._relative_accuracy()
 
-        # generate line plots for the predictions vs labels
-        self.tensorboard.log_plots("bad fits 0.05", [RelativeAccuracy._plot(batch[0], batch[1]) for batch in samples], 0)
-        self.tensorboard.log_plots("average fits", [RelativeAccuracy._plot(batch[2], batch[3]) for batch in samples], 0)
-        self.tensorboard.log_plots("best fits 0.95", [RelativeAccuracy._plot(batch[4], batch[5]) for batch in samples], 0)
+        sorted_index = np.argsort(self.r2)
+        bad_idx = int(len(sorted_index) * 0.05)
+        avg_idx = len(sorted_index) // 2
+        top_idx = int(len(sorted_index) * 0.95)
+        print("bad {}, avg {}, top {}".format(bad_idx, avg_idx, top_idx))
 
-        # finally print a text representation of the histogram
-        print("Tested {} samples".format(len(samples)))
+        self.tensorboard.log_plots("bad fits <= 0.05",
+                                   [RelativeAccuracy._plot(predictions[sorted_index[i]],
+                                                           labels[sorted_index[i]],
+                                                           self.r2[sorted_index[i]])
+                                    for i in range(max(bad_idx - 10, 0), bad_idx)],
+                                   0)
+
+        self.tensorboard.log_plots("average fits ~ 0.5",
+                                   [RelativeAccuracy._plot(predictions[sorted_index[i]],
+                                                           labels[sorted_index[i]],
+                                                           self.r2[sorted_index[i]])
+                                    for i in range(max(avg_idx - 5, 0), min(avg_idx + 5, len(predictions)))],
+                                   0)
+
+        self.tensorboard.log_plots("top fits >= 0.95",
+                                   [RelativeAccuracy._plot(predictions[sorted_index[i]],
+                                                           labels[sorted_index[i]],
+                                                           self.r2[sorted_index[i]])
+                                    for i in range(top_idx, min(top_idx + 10, len(predictions)))],
+                                   0)
+
         ascii_hist(self.r2, 10)
 
     def _relative_accuracy(self):
         batch_size = self.data_generator.batch_size
-        r2 = np.array([])
-        compare = []
+        predictions = []
+        features = []
+        labels = []
+        r2 = []
 
         for i in range(0, len(self.data_generator), batch_size):
-            features, labels = self.data_generator.__getitem__(i)
-            prediction = self.model.predict(features, batch_size=batch_size)
+            features_batch, labels_batch = self.data_generator.__getitem__(i)
+            predictions_batch = self.model.predict(features_batch, batch_size=batch_size)
 
-            # calculate some kind of r² measure for each (label, prediction)
-            r2_batch = np.array([self.relative_accuracy_function(labels[j], prediction[j]) for j in range(len(prediction))])
+            for j in range(batch_size):
+                features.append(features_batch[j])
+                labels.append(labels_batch[j])
+                predictions.append(predictions_batch[j])
+                r2.append(self.relative_accuracy_function(labels_batch[j], predictions_batch[j]))
 
-            # get a sorted index to pick samples of certain quality
-            idx = np.argsort(r2_batch)
+        predictions = np.array(predictions)
+        features = np.array(features)
+        labels = np.array(labels)
+        r2 = np.array(r2)
 
-            if len(prediction.shape) == 2:
-                compare.append(np.array([prediction[idx[int(len(idx) * 0.05)]], labels[idx[int(len(idx) * 0.05)]],
-                                         prediction[idx[len(idx) // 2]], labels[idx[len(idx) // 2]],
-                                         prediction[idx[int(len(idx) * 0.95)]], labels[idx[int(len(idx) * 0.95)]]]))
+        errors = np.array(
+            [math.sqrt(((labels[:, i] - predictions[:, i]) ** 2).sum() / (batch_size - 1)) for i in range(len(labels[0]))])
 
-            # get an array of distances over all samples of all batches
-            r2 = np.hstack([r2, r2_batch])
-
-        # TODO calculate the standard deviation of each predicted label
-
-        # now we have the similarity for each sample in all batches
-        return r2, compare
+        return r2, features, labels, predictions, errors
 
     def _log_histogram(self):
         print('\n', np.histogram(self.r2)[1], '\n')
@@ -104,9 +124,10 @@ class RelativeAccuracy(Callback):
         rmtree(self.log_dir_root, ignore_errors=True)
 
     @staticmethod
-    def _plot(prediction, label):
+    def _plot(prediction, label, title):
         fig = plt.figure()
         plt.plot(prediction, label='predict')
         plt.plot(label, label='label')
         plt.legend(loc='best')
+        plt.title("{}".format(title))
         return fig

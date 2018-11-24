@@ -1,5 +1,6 @@
 from pandas_datareader import DataReader
 from typing import List, Dict, Callable
+from keras.models import load_model
 import pandas as pd
 import numpy as np
 import os.path
@@ -60,9 +61,8 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def __init__(self, dataframe, features, labels,
                  batch_size, lstm_memory_size, aggregation_window_size, forecast_horizon,
-                 de_noising, training_percentage,
+                 training_percentage,
                  return_sequences,
-                 on_epoch_end_callback,
                  is_test):
         'Initialization'
         logging.info("use features: " + ", ".join([f + " rescale: " + str(r) for f, r in features]))
@@ -74,11 +74,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.batch_size = batch_size
         self.lstm_memory_size = lstm_memory_size
         self.aggregation_window_size = aggregation_window_size
-        self.de_noising = de_noising
         self.forecast_horizon = forecast_horizon
         self.training_percentage = training_percentage
         self.return_sequences = return_sequences
-        self.on_epoch_end_callback = on_epoch_end_callback
         self.is_test = is_test
 
         # calculate length
@@ -107,140 +105,142 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def __getitem__(self, i):
         'Generate one batch of data like [batch_size, lstm_memory_size, features]'
+        features = self._build_matrix(i, self.features, True)
+        labels = self._build_matrix(i + self.forecast_horizon, self.labels, self.return_sequences)
+
+        return features, labels
+
+    def _build_matrix(self, i, column_encoders, is_lstm_aggregate):
         # offset index if test set
         index = i + int(self.length * self.training_percentage) if self.is_test else i
 
         # aggregate windows
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        features, labels = self._aggregate_normalized_window(index)
+        matrix = self._aggregate_normalized_window(index, [col for col, _ in column_encoders])
 
-        # normalize data
-        features, labels = self._normalize(index, features, labels)
-
-        # de noise data
-        # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        features, labels = self._de_noise(features, labels)
+        # encode data like normalization
+        matrix = self._encode(index, matrix, column_encoders)
 
         # concatenate all feature and label vectors into one vector
         # shape = (lstm_memory_size + batch_size, window * feature/label_columns)
-        features = self.__concatenate_vectors(features)
-        labels = self.__concatenate_vectors(labels)
+        matrix = self.__concatenate_vectors(matrix)
 
         # make sliding window of lstm_memory_size
         # shape = (batchsize, lstm_memory_size, window * feature/label_columns)
-        features = [features[i:i + self.lstm_memory_size] for i in range(self.batch_size)]
-        labels = [labels[i:i + self.lstm_memory_size] for i in range(self.batch_size)] if self.return_sequences \
-            else [labels[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
+        matrix = [matrix[i:i + self.lstm_memory_size] for i in range(self.batch_size)] if is_lstm_aggregate \
+            else [matrix[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
 
-        return np.array(features), np.array(labels)
+        return np.array(matrix)
 
-    def _aggregate_normalized_window(self, i):
+    def _aggregate_normalized_window(self, i, columns):
         # create data windows
         df = self.dataframe
         window = self.aggregation_window_size
 
+        lstm_range = range(i, i + self.lstm_memory_size + self.batch_size - 1)
         # shape = (columns, lstm_memory_size + batch_size, window)
-        features_range = range(i, i + self.lstm_memory_size + self.batch_size - 1)
-        features = np.array([[df[column].iloc[j:j+window].values
-                              for j in features_range]
-                             for i, (column, rescale) in enumerate(self.features)])
+        vector = np.array([[df[column].iloc[j:j+window].values
+                            for j in lstm_range]
+                           for i, column in enumerate(columns)])
 
-        # shape = (columns, lstm_memory_size + batch_size, window)
-        labels_range = range(i + self.forecast_horizon, i + self.lstm_memory_size + self.batch_size + self.forecast_horizon - 1)
-        labels = np.array([[df[column].iloc[j:j+window].values
-                            for j in labels_range]
-                           for i, (column, rescale) in enumerate(self.labels)])
+        return vector
 
-        return features, labels
-
-    def _normalize(self, index, features, labels):
+    def _encode(self, index, vector, encoding_functions):
         df = self.dataframe
 
-        # shape = (feature / label_columns, lstm_memory_size + batch_size, window)
-        normalized_features = np.array([[(features[i][row] / df[col].iloc[max(0, index + row - 1)]) -1 if rescale else features[i][row]
-                                         for row in (range(features.shape[1]))]
-                                        for i, (col, rescale) in enumerate(self.features)])
+        encoded = np.array([[func(vector[i][row], df[col].iloc[max(0, index + row - 1)], True)
+                             for row in (range(vector.shape[1]))]
+                            for i, (col, func) in enumerate(encoding_functions)])
 
-        normalized_labels = np.array([[(labels[i][row] / df[col].iloc[max(0, index + self.forecast_horizon + row - 1)]) -1 if rescale else labels[i][row]
-                                       for row in (range(labels.shape[1]))]
-                                      for i, (col, rescale) in enumerate(self.labels)])
-
-        return normalized_features, normalized_labels
-
-    def _de_noise(self, features, labels):
-        if self.de_noising is not None:
-            feature_denoiser = {i: l if re.search(r, item) else lambda x: x
-                                for i, (item, rescale) in enumerate(self.features) for r, l in self.de_noising.items()}
-
-            label_denoiser = {i: l if re.search(r, item) else lambda x: x
-                              for i, (item, rescale) in enumerate(self.labels) for r, l in self.de_noising.items()}
-
-            features = np.array([d(features[i], 'F') for i, d in feature_denoiser.items()])
-            labels = np.array([d(labels[i], 'L') for i, d in label_denoiser.items()])
-
-        return features, labels
+        return encoded
 
     def __concatenate_vectors(self, array3D):
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         return array3D.transpose((1, 0, 2)) \
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
 
+    def get_last_features(self):
+        features_batch = self._build_matrix(self.predictive_length() - 1, self.features, True)
+        return features_batch[-1]
+
+    def predictive_length(self):
+        return len(self) + self.forecast_horizon
+
     def on_epoch_end(self):
         'Updates indexes after each epoch'
-        self.on_epoch_end_callback(None)
-
         if self.shuffle:
             raise ValueError('Shuffling not implemented yet')
 
 
 class TestDataGenerator(AbstractDataGenerator):
 
-    def __init__(self, datagenerator, model):
-        super(TestDataGenerator, self).__init__(datagenerator.dataframe,
-                                                datagenerator.features,
-                                                datagenerator.labels,
-                                                datagenerator.batch_size,
-                                                datagenerator.lstm_memory_size,
-                                                datagenerator.aggregation_window_size,
-                                                datagenerator.forecast_horizon,
-                                                datagenerator.de_noising,
-                                                datagenerator.training_percentage,
-                                                datagenerator.return_sequences,
-                                                lambda _: None,
+    def __init__(self, data_generator):
+        super(TestDataGenerator, self).__init__(data_generator.dataframe,
+                                                data_generator.features,
+                                                data_generator.labels,
+                                                data_generator.batch_size,
+                                                data_generator.lstm_memory_size,
+                                                data_generator.aggregation_window_size,
+                                                data_generator.forecast_horizon,
+                                                data_generator.training_percentage,
+                                                data_generator.return_sequences,
                                                 True)
-        self.model = model
-        self.accuracy = pd.DataFrame({})
-
-    def predict(self, model: keras.Model, index: int):
-        # TODO get the feature as index and predict the labels
-        # TODO decode eventually encoded (denoised) vectors
-        # TODO scale back to original domain
-        # TODO if labels present make a comparing output else use just the prediction, later we could make a back-test
-        # TODO add some kind of confidence interval around the prediction
-        pass
-
-    def get_keras_callback(self,
-                           relative_accuracy_function: Callable[[np.ndarray, np.ndarray], np.ndarray]=relative_dtw,
-                           frequency: int=50,
-                           log_dir="./.logs"):
-        # TODO return the callback we prepared and feed back the statistics like stddev of each predicted label
-        callback = RelativeAccuracy(self, relative_accuracy_function, frequency, log_dir)
-        return callback
 
     def on_epoch_end(self):
         pass
 
 
+class PredictiveDataGenerator(AbstractDataGenerator):
+
+    def __init__(self, model: keras.Model, data_generator):
+        super(PredictiveDataGenerator, self).__init__(data_generator.dataframe,
+                                                      data_generator.features,
+                                                      data_generator.labels,
+                                                      data_generator.batch_size,
+                                                      data_generator.lstm_memory_size,
+                                                      data_generator.aggregation_window_size,
+                                                      data_generator.forecast_horizon,
+                                                      1.0,
+                                                      data_generator.return_sequences,
+                                                      False)
+
+        self.model = model
+        # we need to extend DataGenerator because of windowing, encoding and decoding ...
+
+    def predict(self, index: int):
+        i = index if index < 0 else self.predictive_length() - index
+
+        if i < 0 or i >= self.predictive_length():
+            raise ValueError("not enough data, available {} requested {}".format(self.predictive_length(), i))
+
+        features = self._build_matrix(i, self.features, True)[-1]
+        prediction = self.model.predict(features, batch_size=1)
+
+        # plot prediction ...
+
+        # if i < len(self) ... then we also have labels we want to plot
+        # if i < len-of-training-set  ... then we also have labels we want to plot which were part of the training
+        # TODO decode eventually encoded (denoised) vectors
+        # TODO scale back to original domain
+
+        # TODO if labels present make a comparing output else use just the prediction, later we could make a back-test
+        # TODO add some kind of confidence interval around the prediction
+        # return a box plot with line (if labels are present)
+        # https://stackoverflow.com/questions/50181989/plot-boxplot-and-line-from-pandas/50183759#50183759
+        pass
+
+
 class DataGenerator(AbstractDataGenerator):
 
-    def __init__(self, dataframe,  # FIXME provide a DataFetcher and use a classmethod on the DataFetcher instead
-                 features: Dict[str, bool], labels: Dict[str, bool],
+    def __init__(self,
+                 dataframe,  # FIXME provide a DataFetcher and use a classmethod on the DataFetcher instead
+                 features: Dict[str, Callable[[np.ndarray, float, bool], np.ndarray]],
+                 labels: Dict[str, Callable[[np.ndarray, float, bool], np.ndarray]],
                  batch_size: int=100, lstm_memory_size: int=52 * 5, aggregation_window_size: int=32, forecast_horizon: int=None,
                  training_percentage: float=0.8,
                  return_sequences: bool=False,
-                 de_noising: Dict[str, Callable[[np.ndarray, str], np.ndarray]]={".*": lambda x, feature_label_flag: x},
                  variances: Dict[str, float]={".*": 0.94},
-                 on_epoch_end_callback=lambda _: None):
+                 model_filename: str="./model.h5"):
         super(DataGenerator, self).__init__(add_sinusoidal_time(add_ewma_variance(dataframe, variances)),
                                             [(col, r) for col in dataframe.columns for f, r in features.items() if re.search(f, col)],
                                             [(col, r) for col in dataframe.columns for l, r in labels.items() if re.search(l, col)],
@@ -248,13 +248,38 @@ class DataGenerator(AbstractDataGenerator):
                                             lstm_memory_size,
                                             aggregation_window_size,
                                             aggregation_window_size if forecast_horizon is None else forecast_horizon,
-                                            de_noising,
                                             training_percentage,
                                             return_sequences,
-                                            on_epoch_end_callback,
                                             False)
 
         super(DataGenerator, self).on_epoch_end()
+        self.model_filename = model_filename
 
-    def as_test_data_generator(self, model: keras.Model=None) -> TestDataGenerator:
-        return TestDataGenerator(self, model)
+    def as_test_data_generator(self) -> TestDataGenerator:
+        return TestDataGenerator(self)
+
+    def fit(self,
+            model: keras.Model,
+            fit_generator_args: Dict,
+            relative_accuracy_function: Callable[[np.ndarray, np.ndarray], float]=relative_dtw,
+            frequency: int=50,
+            log_dir: str=".logs/"):
+
+        test_data = self.as_test_data_generator()
+        callback = RelativeAccuracy(test_data, relative_accuracy_function, frequency, log_dir)
+
+        fit_generator_args["generator"] = self
+        fit_generator_args["validation_data"] = test_data
+        fit_generator_args["callbacks"] = [callback] + fit_generator_args.get("callbacks", [])
+
+        hist = model.fit_generator(**fit_generator_args)
+
+        model.save(self.model_filename)
+        return hist  # TODO return PredictiveDataGenerator
+
+    def as_predictive_data_generator(self) -> PredictiveDataGenerator:
+        model = load_model(self.model_filename)
+        return PredictiveDataGenerator(model, self)
+
+
+

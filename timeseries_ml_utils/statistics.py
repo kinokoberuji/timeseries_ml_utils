@@ -1,9 +1,20 @@
+from fastdtw import fastdtw
+from scipy.fftpack import dct
 import math
 import re
-
 import pandas as pd
-from fastdtw import fastdtw
 import numpy as np
+
+
+def dct_distance(x, y):
+    cos_x = dct(x)
+    cos_y = dct(y)
+    dist = 0
+
+    for i in range(1, len(cos_x)):
+        dist += abs(cos_x[i] - cos_y[i]) * (1 - 0.97) + 0.97 * dist
+
+    return dist
 
 
 def relative_dtw(x, y):

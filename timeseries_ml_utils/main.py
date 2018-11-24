@@ -1,8 +1,9 @@
+from fastdtw import fastdtw
 from keras.layers import LSTM
 from keras.models import Sequential, load_model
 
 from timeseries_ml_utils.data import *
-from timeseries_ml_utils.statistics import relative_dtw_times_r2
+from timeseries_ml_utils.statistics import *
 
 if __name__ == "__main__":
     # fetch data
@@ -11,7 +12,7 @@ if __name__ == "__main__":
 
     print(len(data.get_dataframe()))
     model_data = DataGenerator(data.get_dataframe(), {"^trigonometric": False, "(Open|High|Low|Close)$": True}, {"GLD.US.Close$": True},
-                               aggregation_window_size=16, batch_size=10)
+                               aggregation_window_size=16, batch_size=10, model_filename="/tmp/keras-foo-1.h5")
     print(model_data.batch_feature_shape)
     print(model_data.batch_label_shape)
     model_data.features, model_data.labels
@@ -27,20 +28,23 @@ if __name__ == "__main__":
                    return_sequences=model_data.return_sequences))
 
     model.compile("Adam", loss="mse", metrics=['mae', 'acc'])
-    print(model.layers[0].get_weights()[0][0])
-    model.save("/tmp/keras-foo-1.h5")
 
-    model = load_model("/tmp/keras-foo-1.h5")
+    train_args = {"epochs": 1,
+                  "use_multiprocessing": True,
+                  "workers": 4,
+                  "shuffle": False}
 
-    train_data = model_data
-    test_data = model_data.as_test_data_generator(model)
-    callback = test_data.get_keras_callback(frequency=10, relative_accuracy_function=relative_dtw_times_r2)
-    callback.clear_all_logs()
+    model_data.fit(model, train_args, frequency=10, relative_accuracy_function=relative_dtw)
 
-    hist = model.fit_generator(generator=train_data,
-                               validation_data=test_data,
-                               epochs=1,
-                               use_multiprocessing=True,
-                               workers=4,
-                               shuffle=False,
-                               callbacks=[callback])
+    # train_data = model_data
+    # test_data = model_data.as_test_data_generator()
+    # callback = test_data.get_keras_callback(frequency=10, relative_accuracy_function=relative_dtw)
+    # callback.clear_all_logs()
+    #
+    # hist = model.fit_generator(generator=train_data,
+    #                            validation_data=test_data,
+    #                            epochs=1,
+    #                            use_multiprocessing=True,
+    #                            workers=4,
+    #                            shuffle=False,
+    #                            callbacks=[callback])

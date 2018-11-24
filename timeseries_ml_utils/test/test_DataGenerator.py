@@ -1,8 +1,10 @@
+import unittest
 from unittest import TestCase
 import pandas as pd
 import numpy as np
 
 from ..data import DataGenerator
+from timeseries_ml_utils.encoders import *
 
 pd.options.display.max_columns = None
 
@@ -17,7 +19,7 @@ class TestDataGenerator(TestCase):
             "GLD.US.Volume": np.arange(19.0)
         }, index=pd.date_range(start='01.01.2015', periods=19))
 
-        data_generator = DataGenerator(df, {"GLD.US.Close$": False, "GLD.US.Volume$": False}, {"GLD.US.Close$": False},
+        data_generator = DataGenerator(df, {"GLD.US.Close$": identity, "GLD.US.Volume$": identity}, {"GLD.US.Close$": identity},
                                        3, 4, 5, 1, training_percentage=0.6, return_sequences=True)
         last_index = len(data_generator) - 1
 
@@ -26,8 +28,8 @@ class TestDataGenerator(TestCase):
         first_batch = data_generator.__getitem__(0)
 
         # assert window aggregation
-        self.assertEqual(data_generator._aggregate_normalized_window(last_index)[0][-1][-1][-1], 13.)
-        self.assertEqual(data_generator._aggregate_normalized_window(last_index)[1][-1][-1][-1], 14.)
+        self.assertEqual(data_generator._aggregate_normalized_window(last_index, [col for col, _ in data_generator.features])[-1][-1][-1], 13.)
+        self.assertEqual(data_generator._aggregate_normalized_window(last_index + data_generator.forecast_horizon, [col for col, _ in data_generator.labels])[-1][-1][-1], 14.)
 
         # assert first batch
         self.assertEqual(data_generator.__getitem__(0)[0][0][0][0], 0.)
@@ -68,7 +70,7 @@ class TestDataGenerator(TestCase):
             "GLD.US.Volume": np.arange(19.0) + 2.0,  # prevent division by 0 or 1
         }, index=pd.date_range(start='01.01.2015', periods=19))
 
-        data_generator = DataGenerator(df, {"GLD.US.Close$": True, "GLD.US.Volume$": False}, {"GLD.US.Close$": True},
+        data_generator = DataGenerator(df, {"GLD.US.Close$": normalize, "GLD.US.Volume$": identity}, {"GLD.US.Close$": normalize},
                                        3, 4, 5, 1, training_percentage=1.0, return_sequences=True)
 
         last_index = len(data_generator) - 1
@@ -93,7 +95,7 @@ class TestDataGenerator(TestCase):
             "GLD.US.Volume": np.arange(19.0) + 2.0,  # prevent division by 0 or 1
         }, index=pd.date_range(start='01.01.2015', periods=19))
 
-        data_generator = DataGenerator(df, {"GLD.US.Close$": True, "GLD.US.Volume$": False}, {"GLD.US.Close$": True},
+        data_generator = DataGenerator(df, {"GLD.US.Close$": normalize, "GLD.US.Volume$": identity}, {"GLD.US.Close$": normalize},
                                        2, 2, 7, 7, training_percentage=1.0, return_sequences=True)
 
         last_index = len(data_generator) - 1
@@ -112,7 +114,7 @@ class TestDataGenerator(TestCase):
             "GLD.US.Volume": np.arange(18.0) + 2.0,  # prevent division by 0 or 1
         }, index=pd.date_range(start='01.01.2015', periods=18))
 
-        data_generator = DataGenerator(df, {"GLD.US.Close$": False, "GLD.US.Volume$": False}, {"GLD.US.Close$": True},
+        data_generator = DataGenerator(df, {"GLD.US.Close$": identity, "GLD.US.Volume$": identity}, {"GLD.US.Close$": normalize},
                                        1, 1, 9, 9, training_percentage=1.0, return_sequences=True)
 
         last_index = len(data_generator) - 1
@@ -129,7 +131,7 @@ class TestDataGenerator(TestCase):
             "GLD.US.Volume": np.arange(18.0) + 2.0  # prevent division by 0 or 1
         }, index=pd.date_range(start='01.01.2015', periods=18))
 
-        data_generator = DataGenerator(df, {"GLD.US.Volume$": False}, {"GLD.US.Volume$": False},
+        data_generator = DataGenerator(df, {"GLD.US.Volume$": identity}, {"GLD.US.Volume$": identity},
                                        2, 2, 7, 7, training_percentage=1.0, return_sequences=True)
 
         last_index = len(data_generator) - 1
@@ -146,11 +148,24 @@ class TestDataGenerator(TestCase):
         }, index=pd.date_range(start='01.01.2015', periods=18))
 
         try:
-            data_generator = DataGenerator(df, {"GLD.US.Volume$": False}, {"GLD.US.Volume$": False},
+            data_generator = DataGenerator(df, {"GLD.US.Volume$": identity}, {"GLD.US.Volume$": identity},
                                            2, 2, 9, 9, training_percentage=1.0, return_sequences=True)
         except ValueError:
             self.assertTrue(True)
         else:
             self.assertTrue(False)
 
+    def test__get_last_features(self):
+        pd.options.display.max_columns = None
+
+        df = pd.DataFrame({
+            "GLD.US.Volume": np.arange(18.0) + 2.0  # prevent division by 0 or 1
+        }, index=pd.date_range(start='01.01.2015', periods=18))
+
+        data_generator = DataGenerator(df, {"GLD.US.Volume$": identity}, {"GLD.US.Volume$": identity},
+                                       2, 2, 7, 7, training_percentage=1.0, return_sequences=True)
+
+        print(data_generator.get_last_features())
+        np.testing.assert_almost_equal(np.array([[12, 13, 14, 15, 16, 17, 18], [13, 14, 15, 16, 17, 18, 19]]),
+                                       data_generator.get_last_features())
 

@@ -1,4 +1,5 @@
 from unittest import TestCase
+from timeseries_ml_utils.encoders import *
 
 from ..data import DataGenerator
 from keras.models import Sequential
@@ -17,7 +18,7 @@ class TestTestDataGenerator(TestCase):
 
 
         # test case
-        data_generator = DataGenerator(df, {"GLD.US.Close$": False, "GLD.US.Volume$": False}, {"GLD.US.Close$": False},
+        data_generator = DataGenerator(df, {"GLD.US.Close$": identity, "GLD.US.Volume$": identity}, {"GLD.US.Close$": identity},
                                        3, 4, 5, training_percentage=0.6, return_sequences=False)
 
         model = Sequential()
@@ -31,8 +32,7 @@ class TestTestDataGenerator(TestCase):
 
         model.compile("Adam", loss="mse")
 
-        test_dg = data_generator.as_test_data_generator(model)
+        test_dg = data_generator.as_test_data_generator()
         test_dg.on_epoch_end()
-        print(test_dg.accuracy.tail())
 
         self.assertTrue(True)
