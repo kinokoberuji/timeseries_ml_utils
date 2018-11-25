@@ -170,7 +170,7 @@ class TestDataGenerator(TestCase):
         np.testing.assert_almost_equal(np.array([[12, 13, 14, 15, 16, 17, 18], [13, 14, 15, 16, 17, 18, 19]]),
                                        data_generator.get_last_features())
 
-    def test__get_prediction(self):
+    def test_prediction(self):
         path = os.path.dirname(timeseries_ml_utils.test.__file__)
         df = pd.read_hdf(os.path.join(path, "resources", "gld.us.h5"), "GLD_US")
 
@@ -179,5 +179,20 @@ class TestDataGenerator(TestCase):
                                        model_filename=os.path.join(path, "resources", "test-prediction-model.h5"))
 
         predictor = data_generator.as_predictive_data_generator()
-        predited_df = predictor.predict(-1)
-        print(predited_df)
+        predicted_df = predictor.predict(-1)
+        print(predicted_df)
+        self.assertTrue(True)
+
+    def test_prediction_with_label_data(self):
+        path = os.path.dirname(timeseries_ml_utils.test.__file__)
+        df = pd.read_hdf(os.path.join(path, "resources", "gld.us.h5"), "GLD_US")
+
+        data_generator = DataGenerator(df, {"Volume$": normalize}, {"Volume$": normalize},
+                                       2, 2, 7, 1, training_percentage=1.0, return_sequences=False,
+                                       model_filename=os.path.join(path, "resources", "test-prediction-model.h5"))
+
+        predictor = data_generator.as_predictive_data_generator()
+        predicted_df = predictor.predict(-100)
+        print(predicted_df)
+        predicted_df.plot()
+        self.assertTrue(True)

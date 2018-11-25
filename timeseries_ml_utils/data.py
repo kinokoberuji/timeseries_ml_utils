@@ -236,7 +236,7 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         # we need to extend DataGenerator because of windowing, encoding and decoding ...
 
     def predict(self, index: int):
-        i = index if index >= 0 else self.predictive_length() + index
+        i = (index if index >= 0 else self.predictive_length() + index) - self.batch_size
 
         if i < 0 or i >= self.predictive_length():
             raise ValueError("not enough data, available {} requested {}".format(self.predictive_length(), i))
@@ -247,6 +247,7 @@ class PredictiveDataGenerator(AbstractDataGenerator):
 
         # perform a prediction of one batch of size self.batch_size
         features = self._build_matrix(features_loc, self.features, True)
+        # TODO if i < 0 we can use an offset in the batch prediction instead of just picking the last one [-1]
         prediction = self.model.predict(features)[-1]
 
         # prediction has shape (, window_size * features)
@@ -258,32 +259,32 @@ class PredictiveDataGenerator(AbstractDataGenerator):
 
         # get the prediction as a pandas
         columns = AbstractDataGenerator._get_column_names(self.labels)
-        historic_df = self.dataframe[columns].iloc[features_loc:labels_loc]
+        begin_of_features_loc = features_loc - self.aggregation_window_size + 1 - self.lstm_memory_size + 1
+        end_of_labels = labels_loc + self.batch_size - 1 + self.aggregation_window_size - 1
+        index = self.dataframe.index.values[labels_loc:end_of_labels] \
+                if end_of_labels < len(self.dataframe) else self._get_prediction_dates(labels_loc)
+
+        historic_df = self.dataframe[columns].iloc[begin_of_features_loc:end_of_labels]
         predictive_df = pd.DataFrame({"{} predicted".format(col): forecast[i][0] for i, col in enumerate(columns)},
-                                     index=self._get_prediction_dates())
+                                     index=index)
 
-        df = pd.concat([historic_df, predictive_df], sort=True)
+        # df = pd.concat([historic_df, predictive_df], sort=False).sort_index()
+        df = historic_df.join(predictive_df, how='outer').sort_index()
 
-        # if i < len(self) ... then we also have labels we want to plot
-        # if i < len-of-training-set  ... then we also have labels we want to plot which were part of the training
-        # TODO decode eventually encoded (denoised) vectors
-        # TODO scale back to original domain
-
-        # TODO if labels present make a comparing output else use just the prediction, later we could make a back-test
-        # TODO add some kind of confidence interval around the prediction
         # return a box plot with line (if labels are present)
         # https://stackoverflow.com/questions/50181989/plot-boxplot-and-line-from-pandas/50183759#50183759
         return df
 
-    def _get_prediction_dates(self):
+    def _get_prediction_dates(self, loc):
         df = self.dataframe
         ix = df.index
 
         # calculate th time deltas and fix the first delta to be zero to get an average
         time_deltas = (ix - np.roll(ix, 1)).values
         time_deltas[0] = datetime.timedelta(0)
-        avg_time_delta = time_deltas.sum() / len(time_deltas)
-        return [ix[-1] + avg_time_delta * i
+        # avg_time_delta = time_deltas[1:].sum() / len(time_deltas)
+        avg_time_delta = time_deltas[1:].min()
+        return [ix[loc] + avg_time_delta * i
                 for i in range(self.forecast_horizon, self.aggregation_window_size + self.forecast_horizon)]
 
 
