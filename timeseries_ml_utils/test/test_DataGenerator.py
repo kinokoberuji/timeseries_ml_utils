@@ -1,8 +1,9 @@
+import os
 import unittest
 from unittest import TestCase
 import pandas as pd
 import numpy as np
-
+import timeseries_ml_utils.test
 from ..data import DataGenerator
 from timeseries_ml_utils.encoders import *
 
@@ -169,3 +170,14 @@ class TestDataGenerator(TestCase):
         np.testing.assert_almost_equal(np.array([[12, 13, 14, 15, 16, 17, 18], [13, 14, 15, 16, 17, 18, 19]]),
                                        data_generator.get_last_features())
 
+    def test__get_prediction(self):
+        path = os.path.dirname(timeseries_ml_utils.test.__file__)
+        df = pd.read_hdf(os.path.join(path, "resources", "gld.us.h5"), "GLD_US")
+
+        data_generator = DataGenerator(df, {"Volume$": identity}, {"Volume$": identity},
+                                       2, 2, 7, 7, training_percentage=1.0, return_sequences=False,  # TODO test a true case
+                                       model_filename=os.path.join(path, "resources", "test-prediction-model.h5"))
+
+        predictor = data_generator.as_predictive_data_generator()
+        predited_df = predictor.predict(-1)
+        print(predited_df)

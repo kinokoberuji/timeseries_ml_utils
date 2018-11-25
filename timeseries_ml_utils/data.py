@@ -1,3 +1,5 @@
+import datetime
+
 from pandas_datareader import DataReader
 from typing import List, Dict, Callable
 from keras.models import load_model
@@ -105,21 +107,28 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def __getitem__(self, i):
         'Generate one batch of data like [batch_size, lstm_memory_size, features]'
-        features = self._build_matrix(i, self.features, True)
-        labels = self._build_matrix(i + self.forecast_horizon, self.labels, self.return_sequences)
+        # offset index if test set
+        features_loc = self._get_features_loc(i)
+        labels_loc = self._get_labels_loc(i)
+
+        features = self._build_matrix(features_loc, self.features, True)
+        labels = self._build_matrix(labels_loc, self.labels, self.return_sequences)
 
         return features, labels
 
-    def _build_matrix(self, i, column_encoders, is_lstm_aggregate):
-        # offset index if test set
-        index = i + int(self.length * self.training_percentage) if self.is_test else i
+    def _get_features_loc(self, i):
+        return i + int(self.length * self.training_percentage) if self.is_test else i
 
+    def _get_labels_loc(self, i):
+        return self._get_features_loc(i) + self.forecast_horizon
+
+    def _build_matrix(self, loc, column_encoders, is_lstm_aggregate):
         # aggregate windows
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        matrix = self._aggregate_normalized_window(index, [col for col, _ in column_encoders])
+        matrix = self._aggregate_normalized_window(loc, [col for col, _ in column_encoders])
 
         # encode data like normalization
-        matrix = self._encode(index, matrix, column_encoders)
+        matrix = self._encode(loc, matrix, column_encoders)
 
         # concatenate all feature and label vectors into one vector
         # shape = (lstm_memory_size + batch_size, window * feature/label_columns)
@@ -132,12 +141,12 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return np.array(matrix)
 
-    def _aggregate_normalized_window(self, i, columns):
+    def _aggregate_normalized_window(self, loc, columns):
         # create data windows
         df = self.dataframe
         window = self.aggregation_window_size
 
-        lstm_range = range(i, i + self.lstm_memory_size + self.batch_size - 1)
+        lstm_range = range(loc, loc + self.lstm_memory_size + self.batch_size - 1)
         # shape = (columns, lstm_memory_size + batch_size, window)
         vector = np.array([[df[column].iloc[j:j+window].values
                             for j in lstm_range]
@@ -145,14 +154,23 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return vector
 
-    def _encode(self, index, vector, encoding_functions):
+    def _encode(self, loc, vector, encoding_functions):
         df = self.dataframe
 
-        encoded = np.array([[func(vector[i][row], df[col].iloc[max(0, index + row - 1)], True)
+        encoded = np.array([[func(vector[i][row], df[col].iloc[max(0, loc + row - 1)], True)
                              for row in (range(vector.shape[1]))]
                             for i, (col, func) in enumerate(encoding_functions)])
 
         return encoded
+
+    def _decode(self, loc, vector, encoding_functions):
+        df = self.dataframe
+
+        decoded = np.array([[func(vector[i][row], df[col].iloc[max(0, loc + row - 1)], False)
+                             for row in (range(vector.shape[1]))]
+                            for i, (col, func) in enumerate(encoding_functions)])
+
+        return decoded
 
     def __concatenate_vectors(self, array3D):
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
@@ -208,15 +226,29 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         # we need to extend DataGenerator because of windowing, encoding and decoding ...
 
     def predict(self, index: int):
-        i = index if index < 0 else self.predictive_length() - index
+        i = index if index >= 0 else self.predictive_length() + index
 
         if i < 0 or i >= self.predictive_length():
             raise ValueError("not enough data, available {} requested {}".format(self.predictive_length(), i))
 
-        features = self._build_matrix(i, self.features, True)[-1]
-        prediction = self.model.predict(features, batch_size=1)
+        # get locations in dataframe
+        features_loc = self._get_features_loc(i)
+        labels_loc = self._get_labels_loc(i)
 
-        # plot prediction ...
+        # perform a prediction of one batch of size self.batch_size
+        features = self._build_matrix(features_loc, self.features, True)
+        prediction = self.model.predict(features)[-1]
+
+        # prediction has shape (, window_size * features)
+        # and we need to re-shape it to (label_columns, 1, window)
+        # decode the prediction
+        forecast = self._decode(labels_loc, prediction, self.labels)
+
+        # get the prediction as a pandas
+        columns = [col for col, _ in self.labels.items()]
+        historic_df = self.dataframe[columns].iloc[features_loc:labels_loc]
+        predictive_df = pd.DataFrame({"prediction": prediction}, index=self._get_prediction_dates())  # FIXME multiple labels
+        df = pd.concat([historic_df, predictive_df], sort=True)
 
         # if i < len(self) ... then we also have labels we want to plot
         # if i < len-of-training-set  ... then we also have labels we want to plot which were part of the training
@@ -227,7 +259,18 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         # TODO add some kind of confidence interval around the prediction
         # return a box plot with line (if labels are present)
         # https://stackoverflow.com/questions/50181989/plot-boxplot-and-line-from-pandas/50183759#50183759
-        pass
+        return df
+
+    def _get_prediction_dates(self):
+        df = self.dataframe
+        ix = df.index
+
+        # calculate th time deltas and fix the first delta to be zero to get an average
+        time_deltas = (ix - np.roll(ix, 1)).values
+        time_deltas[0] = datetime.timedelta(0)
+        avg_time_delta = time_deltas.sum() / len(time_deltas)
+        return [ix[-1] + avg_time_delta * i
+                for i in range(self.forecast_horizon, self.aggregation_window_size + self.forecast_horizon)]
 
 
 class DataGenerator(AbstractDataGenerator):
