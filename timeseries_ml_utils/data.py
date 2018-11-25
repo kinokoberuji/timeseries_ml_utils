@@ -1,7 +1,7 @@
 import datetime
 
 from pandas_datareader import DataReader
-from typing import List, Dict, Callable
+from typing import List, Dict, Callable, Tuple
 from keras.models import load_model
 import pandas as pd
 import numpy as np
@@ -61,11 +61,17 @@ class DataFetcher:
 class AbstractDataGenerator(keras.utils.Sequence):
     'Generates data for Keras'
 
-    def __init__(self, dataframe, features, labels,
-                 batch_size, lstm_memory_size, aggregation_window_size, forecast_horizon,
-                 training_percentage,
-                 return_sequences,
-                 is_test):
+    def __init__(self,
+                 dataframe: pd.DataFrame,
+                 features: List[Tuple[str, Callable]],
+                 labels: List[Tuple[str, Callable]],
+                 batch_size: int,
+                 lstm_memory_size: int,
+                 aggregation_window_size: int,
+                 forecast_horizon :int,
+                 training_percentage: float,
+                 return_sequences: bool,
+                 is_test: bool):
         'Initialization'
         logging.info("use features: " + ", ".join([f + " rescale: " + str(r) for f, r in features]))
         logging.info("use labels: " + ", ".join([l + " rescale: " + str(r) for l, r in labels]))
@@ -125,7 +131,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def _build_matrix(self, loc, column_encoders, is_lstm_aggregate):
         # aggregate windows
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        matrix = self._aggregate_normalized_window(loc, [col for col, _ in column_encoders])
+        matrix = self._aggregate_normalized_window(loc, [col for col, _ in column_encoders])  #TODO replace with function
 
         # encode data like normalization
         matrix = self._encode(loc, matrix, column_encoders)
@@ -176,6 +182,10 @@ class AbstractDataGenerator(keras.utils.Sequence):
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         return array3D.transpose((1, 0, 2)) \
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
+
+    @staticmethod
+    def _get_column_names(encoders):
+        return [col for i, (col, _) in enumerate(encoders)]
 
     def get_last_features(self):
         features_batch = self._build_matrix(self.predictive_length() - 1, self.features, True)
@@ -241,13 +251,17 @@ class PredictiveDataGenerator(AbstractDataGenerator):
 
         # prediction has shape (, window_size * features)
         # and we need to re-shape it to (label_columns, 1, window)
+        predicted_labels = prediction.reshape((len(self.labels), 1, -1))
+
         # decode the prediction
-        forecast = self._decode(labels_loc, prediction, self.labels)
+        forecast = self._decode(labels_loc, predicted_labels, self.labels)
 
         # get the prediction as a pandas
-        columns = [col for col, _ in self.labels.items()]
+        columns = AbstractDataGenerator._get_column_names(self.labels)
         historic_df = self.dataframe[columns].iloc[features_loc:labels_loc]
-        predictive_df = pd.DataFrame({"prediction": prediction}, index=self._get_prediction_dates())  # FIXME multiple labels
+        predictive_df = pd.DataFrame({"{} predicted".format(col): forecast[i][0] for i, col in enumerate(columns)},
+                                     index=self._get_prediction_dates())
+
         df = pd.concat([historic_df, predictive_df], sort=True)
 
         # if i < len(self) ... then we also have labels we want to plot

@@ -25,6 +25,12 @@ def relative_dtw(x, y):
     return (max_dist - prediction_distance) / max_dist
 
 
+def relative_dtw_2(x, y):
+    prediction_distance = fastdtw(x, y, dist=2)[0]
+    max_dist = len(y) * (np.abs(x).max() + np.abs(y).max())
+    return (max_dist - prediction_distance) / max_dist
+
+
 def r_square(x, y):
     x1 = x + 1
     y1 = y + 1
