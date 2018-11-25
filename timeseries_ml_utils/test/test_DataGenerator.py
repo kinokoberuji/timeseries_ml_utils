@@ -29,8 +29,8 @@ class TestDataGenerator(TestCase):
         first_batch = data_generator.__getitem__(0)
 
         # assert window aggregation
-        self.assertEqual(data_generator._aggregate_normalized_window(last_index, [col for col, _ in data_generator.features])[-1][-1][-1], 13.)
-        self.assertEqual(data_generator._aggregate_normalized_window(last_index + data_generator.forecast_horizon, [col for col, _ in data_generator.labels])[-1][-1][-1], 14.)
+        self.assertEqual(data_generator._aggregate_normalized_window(last_index, [col for col, _ in data_generator.features])[0][-1][-1][-1], 13.)
+        self.assertEqual(data_generator._aggregate_normalized_window(last_index + data_generator.forecast_horizon, [col for col, _ in data_generator.labels])[0][-1][-1][-1], 14.)
 
         # assert first batch
         self.assertEqual(data_generator.__getitem__(0)[0][0][0][0], 0.)
@@ -166,9 +166,9 @@ class TestDataGenerator(TestCase):
         data_generator = DataGenerator(df, {"GLD.US.Volume$": identity}, {"GLD.US.Volume$": identity},
                                        2, 2, 7, 7, training_percentage=1.0, return_sequences=True)
 
-        print(data_generator.get_last_features())
+        print(data_generator._get_last_features())
         np.testing.assert_almost_equal(np.array([[12, 13, 14, 15, 16, 17, 18], [13, 14, 15, 16, 17, 18, 19]]),
-                                       data_generator.get_last_features())
+                                       data_generator._get_last_features()[0])
 
     def test_prediction(self):
         path = os.path.dirname(timeseries_ml_utils.test.__file__)

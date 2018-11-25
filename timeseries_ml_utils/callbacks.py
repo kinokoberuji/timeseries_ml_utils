@@ -58,10 +58,10 @@ class RelativeAccuracy(Callback):
         self.r2, features, labels, predictions, errors = self._relative_accuracy()
 
         sorted_index = np.argsort(self.r2)
-        bad_idx = int(len(sorted_index) * 0.05)
+        bad_idx = int(len(sorted_index) * 0.10)
         avg_idx = len(sorted_index) // 2
-        top_idx = int(len(sorted_index) * 0.95)
-        print("bad {}, avg {}, top {}".format(bad_idx, avg_idx, top_idx))
+        top_idx = int(len(sorted_index) * 0.90)
+        print("bad {}, avg {}, top {}, last {}".format(bad_idx, avg_idx, top_idx, len(sorted_index)))
 
         self.tensorboard.log_plots("bad fits <= 0.05",
                                    [RelativeAccuracy._plot(predictions[sorted_index[i]],

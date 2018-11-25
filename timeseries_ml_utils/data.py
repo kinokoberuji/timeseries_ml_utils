@@ -103,8 +103,11 @@ class AbstractDataGenerator(keras.utils.Sequence):
             raise ValueError('Not enough Data for given memory and window sizes: ' + str(self.length))
 
         # derived properties
-        self.batch_feature_shape = self.__getitem__(0)[0].shape
-        self.batch_label_shape = self.__getitem__(0)[1].shape
+        # we only know the shape (self.batch_size, self.lstm_memory_size, ??) but the number of features depend on the
+        # encoder/decoder so we can not kno them a priori
+        item_zero = self[0]
+        self.batch_feature_shape = item_zero[0].shape
+        self.batch_label_shape = item_zero[1].shape
 
     def __len__(self):
         'Denotes the number of batches per epoch'
@@ -117,8 +120,8 @@ class AbstractDataGenerator(keras.utils.Sequence):
         features_loc = self._get_features_loc(i)
         labels_loc = self._get_labels_loc(i)
 
-        features = self._build_matrix(features_loc, self.features, True)
-        labels = self._build_matrix(labels_loc, self.labels, self.return_sequences)
+        features, _ = self._build_matrix(features_loc, self.features, True)
+        labels, _ = self._build_matrix(labels_loc, self.labels, self.return_sequences)
 
         return features, labels
 
@@ -131,7 +134,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def _build_matrix(self, loc, column_encoders, is_lstm_aggregate):
         # aggregate windows
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        matrix = self._aggregate_normalized_window(loc, [col for col, _ in column_encoders])  #TODO replace with function
+        matrix, index = self._aggregate_normalized_window(loc, AbstractDataGenerator._get_column_names(column_encoders))
 
         # encode data like normalization
         matrix = self._encode(loc, matrix, column_encoders)
@@ -145,7 +148,8 @@ class AbstractDataGenerator(keras.utils.Sequence):
         matrix = [matrix[i:i + self.lstm_memory_size] for i in range(self.batch_size)] if is_lstm_aggregate \
             else [matrix[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
 
-        return np.array(matrix)
+        index = [index[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
+        return np.array(matrix), index
 
     def _aggregate_normalized_window(self, loc, columns):
         # create data windows
@@ -153,17 +157,19 @@ class AbstractDataGenerator(keras.utils.Sequence):
         window = self.aggregation_window_size
 
         lstm_range = range(loc, loc + self.lstm_memory_size + self.batch_size - 1)
+
         # shape = (columns, lstm_memory_size + batch_size, window)
         vector = np.array([[df[column].iloc[j:j+window].values
                             for j in lstm_range]
                            for i, column in enumerate(columns)])
 
-        return vector
+        index = [df.index[j:j+window].values for j in lstm_range]
+        return vector, index
 
     def _encode(self, loc, vector, encoding_functions):
         df = self.dataframe
 
-        encoded = np.array([[func(vector[i][row], df[col].iloc[max(0, loc + row - 1)], True)
+        encoded = np.array([[func(vector[i][row], df[col].iloc[max(0, loc + row - 1)], True)  # FIXME row-1 is not sufficient for labels with forecast horizon > 1
                              for row in (range(vector.shape[1]))]
                             for i, (col, func) in enumerate(encoding_functions)])
 
@@ -187,9 +193,10 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def _get_column_names(encoders):
         return [col for i, (col, _) in enumerate(encoders)]
 
-    def get_last_features(self):
-        features_batch = self._build_matrix(self.predictive_length() - 1, self.features, True)
-        return features_batch[-1]
+    def _get_last_features(self, n=-1):
+        loc = self.predictive_length() + n
+        features_batch, index = self._build_matrix(loc, self.features, True)
+        return features_batch[-1], index[-1]
 
     def predictive_length(self):
         return len(self) + self.forecast_horizon
@@ -235,38 +242,37 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         self.model = model
         # we need to extend DataGenerator because of windowing, encoding and decoding ...
 
-    def predict(self, index: int):
-        i = (index if index >= 0 else self.predictive_length() + index) - self.batch_size
+    def predict(self, i: int):
+        df = self.dataframe
+        features, index = self._get_last_features(i) if i < 0 else self._get_features_loc(i)
+        start_loc_features = df.index.get_loc(index[0])
+        start_loc_labels = start_loc_features + self.forecast_horizon
 
-        if i < 0 or i >= self.predictive_length():
-            raise ValueError("not enough data, available {} requested {}".format(self.predictive_length(), i))
 
-        # get locations in dataframe
-        features_loc = self._get_features_loc(i)
-        labels_loc = self._get_labels_loc(i)
-
-        # perform a prediction of one batch of size self.batch_size
-        features = self._build_matrix(features_loc, self.features, True)
-        # TODO if i < 0 we can use an offset in the batch prediction instead of just picking the last one [-1]
-        prediction = self.model.predict(features)[-1]
+        # for some reason we need to fake a batch for the predict method
+        features_batch = np.array([features for _ in range(self.batch_size)])
+        prediction = self.model.predict(features_batch)[-1]
 
         # prediction has shape (, window_size * features)
         # and we need to re-shape it to (label_columns, 1, window)
         predicted_labels = prediction.reshape((len(self.labels), 1, -1))
+        stop_loc_labels = start_loc_labels + predicted_labels.shape[2]
 
         # decode the prediction
-        forecast = self._decode(labels_loc, predicted_labels, self.labels)
+        forecast = self._decode(start_loc_labels, predicted_labels, self.labels)
 
         # get the prediction as a pandas
         columns = AbstractDataGenerator._get_column_names(self.labels)
-        begin_of_features_loc = features_loc - self.aggregation_window_size + 1 - self.lstm_memory_size + 1
-        end_of_labels = labels_loc + self.batch_size - 1 + self.aggregation_window_size - 1
-        index = self.dataframe.index.values[labels_loc:end_of_labels] \
-                if end_of_labels < len(self.dataframe) else self._get_prediction_dates(labels_loc)
+        stop_loc_labels = start_loc_labels + predicted_labels.shape[2]
 
-        historic_df = self.dataframe[columns].iloc[begin_of_features_loc:end_of_labels]
+        # FIXME we need to be able to blend predicted and calculated index i.e. at i = -2
+        prediction_index = df.index.values[start_loc_labels:stop_loc_labels] \
+            if stop_loc_labels < len(self.dataframe) else \
+            self._get_prediction_dates(start_loc_labels, predicted_labels.shape[2])
+
+        historic_df = self.dataframe[columns].iloc[start_loc_features:start_loc_labels]
         predictive_df = pd.DataFrame({"{} predicted".format(col): forecast[i][0] for i, col in enumerate(columns)},
-                                     index=index)
+                                     index=prediction_index)
 
         # df = pd.concat([historic_df, predictive_df], sort=False).sort_index()
         df = historic_df.join(predictive_df, how='outer').sort_index()
@@ -275,7 +281,7 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         # https://stackoverflow.com/questions/50181989/plot-boxplot-and-line-from-pandas/50183759#50183759
         return df
 
-    def _get_prediction_dates(self, loc):
+    def _get_prediction_dates(self, loc, len):
         df = self.dataframe
         ix = df.index
 
@@ -284,8 +290,8 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         time_deltas[0] = datetime.timedelta(0)
         # avg_time_delta = time_deltas[1:].sum() / len(time_deltas)
         avg_time_delta = time_deltas[1:].min()
-        return [ix[loc] + avg_time_delta * i
-                for i in range(self.forecast_horizon, self.aggregation_window_size + self.forecast_horizon)]
+        return [ix[loc - 1] + avg_time_delta * i
+                for i in range(len)]
 
 
 class DataGenerator(AbstractDataGenerator):
