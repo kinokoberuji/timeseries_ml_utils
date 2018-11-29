@@ -206,7 +206,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
 
     def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        length = len(self) - self.forecast_horizon
+        length = len(self) + self.batch_size - self.forecast_horizon
 
         # make a prediction
         prediction = np.hstack([self._decode_batch(self._get_features_loc(batch),
@@ -218,7 +218,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         # Note that we doe not want to encode the labels this time so we pass identity encoder and decoder
         identity_encoders = [(col, identity) for _, (col, _) in enumerate(self.labels)]
         labels = np.hstack([self._decode_batch(self._get_labels_loc(batch),
-                                               self._get_labels_batch(self._get_labels_loc(batch), identity_encoders)[0],
+                                               self._get_labels_batch(batch, identity_encoders)[0],
                                                identity_encoders)
                             for batch in range(0, length, self.batch_size)])
 
@@ -288,6 +288,7 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         return super(PredictiveDataGenerator, self).back_test(lambda x: self.model.predict(x))
 
     def predict(self, i: int):
+        # FIXME we should be able to make use of backtest functionality
         df = self.dataframe
         features, index = self._get_last_features(i) if i < 0 else self._get_features_loc(i)
         start_loc_features = df.index.get_loc(index[0])

@@ -185,16 +185,18 @@ class TestDataGenerator(TestCase):
             data_generator.batch_size, axis=0)
 
         prediction, labels, r_squares, stds = data_generator.back_test(predictor)
-        self.assertEqual(prediction.shape, (2, 2224, 7))
-        self.assertEqual(labels.shape, (2, 2224, 7))
-        self.assertEqual(r_squares.shape, (2, 2224))
+        self.assertEqual(prediction.shape, (2, 2228, 7))
+        self.assertEqual(labels.shape, (2, 2228, 7))
+        self.assertEqual(r_squares.shape, (2, 2228))
         self.assertEqual(stds.shape, (2, 1, 7))
+        self.assertEqual(df["Volume"].iloc[-data_generator.forecast_horizon], labels[1][-1][-1])
+        self.assertEqual(df["Close"].iloc[-data_generator.forecast_horizon], labels[0][-1][-1])
 
     def test_back_test2(self):
         path = os.path.dirname(timeseries_ml_utils.test.__file__)
         df = pd.read_hdf(os.path.join(path, "resources", "gld.us.h5"), "GLD_US")
 
-        data_generator = DataGenerator(df, {"Volume$": normalize}, {"Volume$": normalize},
+        data_generator = DataGenerator(df, {"Volume$": identity}, {"Volume$": identity},
                                        4, 3, 7, 2, training_percentage=1.0, return_sequences=False,
                                        # TODO test a true case
                                        model_filename=os.path.join(path, "resources", "test-prediction-model.h5"))
@@ -205,10 +207,11 @@ class TestDataGenerator(TestCase):
             data_generator.batch_size, axis=0)
 
         prediction, labels, r_squares, stds = data_generator.back_test(predictor)
-        self.assertEqual(prediction.shape, (1, 2224, 7))
-        self.assertEqual(labels.shape, (1, 2224, 7))
-        self.assertEqual(r_squares.shape, (1, 2224))
+        self.assertEqual(prediction.shape, (1, 2228, 7))
+        self.assertEqual(labels.shape, (1, 2228, 7))
+        self.assertEqual(r_squares.shape, (1, 2228))
         self.assertEqual(stds.shape, (1, 1, 7))
+        self.assertEqual(df["Volume"].iloc[-data_generator.forecast_horizon], labels[0][-1][-1])
 
     def test_prediction(self):
         path = os.path.dirname(timeseries_ml_utils.test.__file__)
