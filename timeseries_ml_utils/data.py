@@ -1,18 +1,19 @@
 import datetime
-
-from pandas_datareader import DataReader
-from typing import List, Dict, Callable, Tuple
-from keras.models import load_model
-import pandas as pd
-import numpy as np
-import os.path
 import logging
-import keras
 import os
+import os.path
 import re
+from typing import List, Dict, Callable, Tuple
 
+import keras
+import numpy as np
+import pandas as pd
+from keras.models import load_model
+from pandas_datareader import DataReader
+
+from timeseries_ml_utils.encoders import identity
 from .callbacks import RelativeAccuracy
-from .statistics import add_ewma_variance, add_sinusoidal_time, relative_dtw
+from .statistics import add_ewma_variance, add_sinusoidal_time, relative_dtw, r_square
 
 
 class DataFetcher:
@@ -116,17 +117,24 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def __getitem__(self, i):
         'Generate one batch of data like [batch_size, lstm_memory_size, features]'
+        features_batch, _ = self._get_features_batch(i)
+        labels_batch, _ = self._get_labels_batch(i, self.labels)
+        return features_batch, labels_batch
+
+    def _get_features_batch(self, i, decoders=None):
         # offset index if test set
         features_loc = self._get_features_loc(i)
-        labels_loc = self._get_labels_loc(i)
-
-        features, _ = self._build_matrix(features_loc, self.features, True)
-        labels, _ = self._build_matrix(labels_loc, self.labels, self.return_sequences)
-
-        return features, labels
+        features, index = self._build_matrix(features_loc, decoders or self.features, True)
+        return features, index
 
     def _get_features_loc(self, i):
         return i + int(self.length * self.training_percentage) if self.is_test else i
+
+    def _get_labels_batch(self, i, decoders=None):
+        # offset index if test set
+        labels_loc = self._get_labels_loc(i)
+        labels, index = self._build_matrix(labels_loc, decoders or self.labels, self.return_sequences)
+        return labels, index
 
     def _get_labels_loc(self, i):
         return self._get_features_loc(i) + self.forecast_horizon
@@ -175,11 +183,19 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return encoded
 
+    def _decode_batch(self, loc, batch, encoding_functions):
+        # return shape (features, batchsize, aggregation_window)
+        return np.hstack([self._decode(1, item, encoding_functions) for item in batch])
+
     def _decode(self, loc, vector, encoding_functions):
         df = self.dataframe
 
-        decoded = np.array([[func(vector[i][row], df[col].iloc[max(0, loc + row - 1)], False)
-                             for row in (range(vector.shape[1]))]
+        # first reshape a 1D vector into (nr of labels, 1, aggregation window)
+        decoded = vector.reshape((len(self.labels), 1, -1))
+
+        # now we can decode each row of each column with its associated decoder
+        decoded = np.array([[func(decoded[i][row], df[col].iloc[max(0, loc + row - 1)], False)
+                             for row in (range(decoded.shape[1]))]
                             for i, (col, func) in enumerate(encoding_functions)])
 
         return decoded
@@ -188,6 +204,32 @@ class AbstractDataGenerator(keras.utils.Sequence):
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         return array3D.transpose((1, 0, 2)) \
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
+
+    def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        length = len(self) - self.forecast_horizon
+
+        # make a prediction
+        prediction = np.hstack([self._decode_batch(self._get_features_loc(batch),
+                                                   batch_predictor(self._get_features_batch(batch)[0]),
+                                                   self.labels)
+                                for batch in range(0, length, self.batch_size)])
+
+        # get the labels.
+        # Note that we doe not want to encode the labels this time so we pass identity encoder and decoder
+        identity_encoders = [(col, identity) for _, (col, _) in enumerate(self.labels)]
+        labels = np.hstack([self._decode_batch(self._get_labels_loc(batch),
+                                               self._get_labels_batch(self._get_labels_loc(batch), identity_encoders)[0],
+                                               identity_encoders)
+                            for batch in range(0, length, self.batch_size)])
+
+        # calculate errors between prediction and label per value
+        errors = prediction - labels
+        stds = np.apply_over_axes(np.std, errors, [1])  # expect errors.shape[0] == labels.shape[1]
+        r_squares = np.array([[r_square(prediction[i, j], labels[i, j])
+                               for j in range(errors.shape[1])]
+                              for i in range(errors.shape[0])])
+
+        return prediction, labels, r_squares, stds
 
     @staticmethod
     def _get_column_names(encoders):
@@ -242,12 +284,14 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         self.model = model
         # we need to extend DataGenerator because of windowing, encoding and decoding ...
 
+    def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray]):
+        return super(PredictiveDataGenerator, self).back_test(lambda x: self.model.predict(x))
+
     def predict(self, i: int):
         df = self.dataframe
         features, index = self._get_last_features(i) if i < 0 else self._get_features_loc(i)
         start_loc_features = df.index.get_loc(index[0])
         start_loc_labels = start_loc_features + self.forecast_horizon
-
 
         # for some reason we need to fake a batch for the predict method
         features_batch = np.array([features for _ in range(self.batch_size)])
@@ -291,7 +335,7 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         # avg_time_delta = time_deltas[1:].sum() / len(time_deltas)
         avg_time_delta = time_deltas[1:].min()
         return [ix[loc - 1] + avg_time_delta * i
-                for i in range(len)]
+                for i in range(1, len + 1)]
 
 
 class DataGenerator(AbstractDataGenerator):
