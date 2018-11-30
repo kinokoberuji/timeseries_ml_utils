@@ -177,9 +177,10 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def _encode(self, loc, vector, encoding_functions):
         df = self.dataframe
 
-        encoded = np.array([[func(vector[i][row], df[col].iloc[max(0, loc + row - 1)], True)  # FIXME row-1 is not sufficient for labels with forecast horizon > 1
-                             for row in (range(vector.shape[1]))]
-                            for i, (col, func) in enumerate(encoding_functions)])
+        # fixme -1 is not enough for forecast horizon > 1
+        encoded = np.stack([np.array([func(vector[i][row], df[col].iloc[max(0, loc + row - 1)], True)
+                                      for row in (range(vector.shape[1]))])
+                            for i, (col, func) in enumerate(encoding_functions)], axis=0)
 
         return encoded
 
@@ -193,10 +194,11 @@ class AbstractDataGenerator(keras.utils.Sequence):
         # first reshape a 1D vector into (nr of labels, 1, aggregation window)
         decoded = vector.reshape((len(self.labels), 1, -1))
 
+        # fixme -1 is not enough for forecast horizon > 1
         # now we can decode each row of each column with its associated decoder
-        decoded = np.array([[func(decoded[i][row], df[col].iloc[max(0, loc + row - 1)], False)
-                             for row in (range(decoded.shape[1]))]
-                            for i, (col, func) in enumerate(encoding_functions)])
+        decoded = np.stack([np.array([func(decoded[i][row], df[col].iloc[max(0, loc + row - 1)], False)
+                                      for row in (range(decoded.shape[1]))])
+                            for i, (col, func) in enumerate(encoding_functions)], axis=0)
 
         return decoded
 
