@@ -184,7 +184,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         return encoded
 
     def _decode_batch(self, loc, batch, encoding_functions):
-        # return shape (features, batchsize, aggregation_window)
+        # return shape (features, batch_size, aggregation_window)
         return np.hstack([self._decode(1, item, encoding_functions) for item in batch])
 
     def _decode(self, loc, vector, encoding_functions):
@@ -269,6 +269,7 @@ class TestDataGenerator(AbstractDataGenerator):
 
 class PredictiveDataGenerator(AbstractDataGenerator):
 
+    # we need to extend DataGenerator because of windowing, encoding and decoding ...
     def __init__(self, model: keras.Model, data_generator):
         super(PredictiveDataGenerator, self).__init__(data_generator.dataframe,
                                                       data_generator.features,
@@ -282,61 +283,48 @@ class PredictiveDataGenerator(AbstractDataGenerator):
                                                       False)
 
         self.model = model
-        # we need to extend DataGenerator because of windowing, encoding and decoding ...
 
-    def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray]):
-        return super(PredictiveDataGenerator, self).back_test(lambda x: self.model.predict(x))
+    def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray] = None):
+        return super(PredictiveDataGenerator, self).back_test(batch_predictor or self.model.predict)
 
     def predict(self, i: int):
-        # FIXME we should be able to make use of backtest functionality
+        timedelta = self._get_time_delta()
         df = self.dataframe
+        df_dates = df.index
+        df_len = len(df)
+
+        # get features and locations in dataframe
         features, index = self._get_last_features(i) if i < 0 else self._get_features_loc(i)
         start_loc_features = df.index.get_loc(index[0])
         start_loc_labels = start_loc_features + self.forecast_horizon
 
         # for some reason we need to fake a batch for the predict method
-        features_batch = np.array([features for _ in range(self.batch_size)])
-        prediction = self.model.predict(features_batch)[-1]
+        features_batch = np.repeat([features], self.batch_size, axis=0)
+        prediction = self._decode(start_loc_labels, self.model.predict(features_batch)[-1], self.labels)
+        stop_loc_labels = start_loc_labels + prediction.shape[2]
 
-        # prediction has shape (, window_size * features)
-        # and we need to re-shape it to (label_columns, 1, window)
-        predicted_labels = prediction.reshape((len(self.labels), 1, -1))
-        stop_loc_labels = start_loc_labels + predicted_labels.shape[2]
+        # calculate timeline for past and predicted values
+        timeline = [df_dates[i] if i < df_len else df_dates[-1] + timedelta * (i - df_len + 1)
+                    for i in range(start_loc_features, stop_loc_labels)]
 
-        # decode the prediction
-        forecast = self._decode(start_loc_labels, predicted_labels, self.labels)
+        # generate the prediction dataframe
+        prediction_df = pd.DataFrame({
+            col + " predicted": np.hstack([np.repeat(np.nan, len(timeline) - prediction.shape[-1]), prediction[i][-1]])
+            for i, (col, _) in enumerate(self.labels)
+        }, index=timeline)
 
-        # get the prediction as a pandas
-        columns = AbstractDataGenerator._get_column_names(self.labels)
-        stop_loc_labels = start_loc_labels + predicted_labels.shape[2]
+        # join the historic dataframe
+        columns = list(set(self._get_column_names(self.features) + self._get_column_names(self.labels)))
+        prediction_df = prediction_df.join(df[columns], how='left')
 
-        # FIXME we need to be able to blend predicted and calculated index i.e. at i = -2
-        prediction_index = df.index.values[start_loc_labels:stop_loc_labels] \
-            if stop_loc_labels < len(self.dataframe) else \
-            self._get_prediction_dates(start_loc_labels, predicted_labels.shape[2])
+        # todo add upper and lower band
+        return prediction_df
 
-        historic_df = self.dataframe[columns].iloc[start_loc_features:start_loc_labels]
-        predictive_df = pd.DataFrame({"{} predicted".format(col): forecast[i][0] for i, col in enumerate(columns)},
-                                     index=prediction_index)
-
-        # df = pd.concat([historic_df, predictive_df], sort=False).sort_index()
-        df = historic_df.join(predictive_df, how='outer').sort_index()
-
-        # return a box plot with line (if labels are present)
-        # https://stackoverflow.com/questions/50181989/plot-boxplot-and-line-from-pandas/50183759#50183759
-        return df
-
-    def _get_prediction_dates(self, loc, len):
-        df = self.dataframe
-        ix = df.index
-
-        # calculate th time deltas and fix the first delta to be zero to get an average
+    def _get_time_delta(self):
+        ix = self.dataframe.index
         time_deltas = (ix - np.roll(ix, 1)).values
         time_deltas[0] = datetime.timedelta(0)
-        # avg_time_delta = time_deltas[1:].sum() / len(time_deltas)
-        avg_time_delta = time_deltas[1:].min()
-        return [ix[loc - 1] + avg_time_delta * i
-                for i in range(1, len + 1)]
+        return time_deltas[1:].min()
 
 
 class DataGenerator(AbstractDataGenerator):
