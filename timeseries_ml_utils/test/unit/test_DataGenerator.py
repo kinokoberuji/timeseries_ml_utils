@@ -122,6 +122,17 @@ class Test_DataGenerator(TestCase):
         self.assertEqual(self.df.index[-1], pd.Timestamp(last_index[-1]))
         pass
 
+    def test_get_labels_batch(self):
+        last_index = len(self.dg) - 1
+        decoders = [(col, lambda x, ref, _: np.repeat(ref, len(x))) for col, _ in self.dg.labels]
+        features_batch, features_index = self.dg._get_features_batch(last_index)
+        features_ref_batch, _ = self.dg._get_features_batch(last_index, decoders)
+        labels_batch, labels_index = self.dg._get_labels_batch(last_index, decoders)
+
+        self.assertEqual(features_batch[-1, -2, 0], features_ref_batch[-1, -1, 0])
+        self.assertEqual(features_ref_batch[-1, -1, 0], labels_batch[-1, -1])
+        self.assertEqual(self.df.index[-1], pd.Timestamp(labels_index[-1][-1]))
+
     def test_decode(self):
         arr = np.array(np.repeat([1, 2, 3, 4], len(self.dg.labels)))
         decoded = self.dg._decode(arr, np.array([[1]]), [("", normalize)])
@@ -131,38 +142,30 @@ class Test_DataGenerator(TestCase):
 
         self.assertEqual(expected_shape, decoded.shape)
 
+    def test_get_decode_ref_values(self):
+        last_index = len(self.dg) - 1
+
+        decoders = [(col, lambda x, ref, _: np.repeat(ref, len(x))) for col, _ in self.dg.labels]
+        labels_batch, labels_index = self.dg._get_labels_batch(last_index, decoders)
+
+        ref_values, ref_index = self.dg._get_decode_ref_values(last_index, self.dg._get_column_names(self.dg.labels))
+        np.testing.assert_array_equal(labels_batch[:, 0], ref_values[:, 0, 0])
+
     def test_decode_batch(self):
-        i = 0
-        f_loc = self.dg._get_features_loc(i)
-        fe_loc = self.dg._get_end_of_features_loc(i)
+        last_index = len(self.dg) - 1
 
-        features, features_index = self.dg._get_features_batch(i, [(col, identity) for col, _ in self.dg.features])
-        ref_values_index = [self.dg._get_reference_values(fe_loc + 1 + i, self.dg._get_column_names(self.dg.labels))
-                            for i in range(len(features))]
-
-        prediction = np.vstack([np.repeat(lstm_hist[-1][-1], lstm_hist.shape[1]) for lstm_hist in features])
-        decoded, decoded_index = self.dg._decode_batch(prediction, ref_values_index, self.dg.labels)
-
-        for i in range(len(features_index)):
-            self.assertEqual(pd.Timestamp(features_index[i][-1]), decoded_index[i][-2])
-
+        # shape (batch_size, features, lstm_hist, aggregation)
+        decoded_batch, index, ref_index = self.dg._decode_batch(last_index, lambda x: x[:, -1], self.dg.labels)
         pass
 
     def test_back_test_batch(self):
-        # prediction, labels, errors, r_squares = self.dg._back_test_batch(0, lambda x: np.repeat(x[-1], len(x)))
-
+        prediction, labels, errors, r_squares = self.dg._back_test_batch(0, lambda x: np.repeat(x[-1], len(x)))
         pass
 
     def backtest(self):
         # since we normalize we denormalize using (1 + x) * ref value which equals to the ref_value
         self.dg.back_test(lambda x: np.repeat(x[-1], len(x)))
 
-        pass
-
-    def _get_last_features(self, n=-1):
-        pass
-
-    def predictive_length(self):
         pass
 
 

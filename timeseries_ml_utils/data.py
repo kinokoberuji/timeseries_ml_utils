@@ -206,26 +206,6 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return encoded
 
-    def _decode_batch(self, batch, ref_values_index, encoding_functions):
-        # return shape (features, batch_size, aggregation_window)
-        decoded_batch = np.hstack([self._decode(item, ref_values_index[i][0], encoding_functions)
-                                   for i, item in enumerate(batch)])
-
-        decoded_indexes = [np.array(i[1]) for i in ref_values_index]
-
-        return decoded_batch, decoded_indexes
-
-    def _decode(self, vector, reference_values, encoding_functions):
-        # first reshape a 1D vector into (nr of labels, 1, aggregation window)
-        decoded = vector.reshape((len(self.labels), 1, -1))
-
-        # now we can decode each row of each column with its associated decoder
-        decoded = np.stack([np.array([func(decoded[i, row], reference_values[i, row], False)
-                                      for row in (range(decoded.shape[1]))])
-                            for i, (col, func) in enumerate(encoding_functions)], axis=0)
-
-        return decoded
-
     def _concatenate_vectors(self, array3D):
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         return array3D.transpose((1, 0, 2)) \
@@ -263,6 +243,49 @@ class AbstractDataGenerator(keras.utils.Sequence):
         r_squares = np.array([0])
 
         return prediction, labels, errors, r_squares
+
+    def _decode_batch(self, i, predictor_function, decoding_functions, is_lstm_aggregate=False):
+        # get values
+        features, index = self._get_features_batch(i)
+        prediction = predictor_function(features)
+
+        # get reference values
+        batch_ref_values, batch_ref_index = self._get_decode_ref_values(i, [col for col, _ in decoding_functions])
+
+        # finally we can decode our prediction to shape (batch_size, features, lstm_hist, aggregation)
+        decoded_batch = np.stack([self._decode(sample, batch_ref_values[i], decoding_functions)
+                                  for i, sample in enumerate(prediction)], axis=1)
+
+        return decoded_batch, index, batch_ref_index
+
+    def _get_decode_ref_values(self, i, columns, is_lstm_aggregate=False):
+        ref_loc = self._get_features_loc(i)
+        ref_values, ref_index = self._get_reference_values(ref_loc, columns)
+
+        # now we need to reshape the reference values to fit the batch and lstm sizes
+        if is_lstm_aggregate:
+            batch_ref_values = [[ref_values[col, i:i + self.lstm_memory_size]
+                                 for col in range(len(columns))]
+                                for i in range(self.batch_size)]
+        else:
+            batch_ref_values = [[ref_values[col, i + self.lstm_memory_size - 1:i + self.lstm_memory_size]
+                                 for col in range(len(columns))]
+                                for i in range(self.batch_size)]
+
+        batch_ref_index = [ref_index[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
+        return np.stack(batch_ref_values, axis=0), batch_ref_index
+
+    def _decode(self, vector, reference_values, decoding_functions):
+        # first reshape a 1D vector into (nr of labels, 1, aggregation window)
+        # fixme the hard coded 1 is wrong if self.return_sequences
+        decoded = vector.reshape((len(self.labels), 1, -1))
+
+        # now we can decode each row of each column with its associated decoder
+        decoded = np.stack([np.array([func(decoded[i, row], reference_values[i, row], False)
+                                      for row in (range(decoded.shape[1]))])
+                            for i, (col, func) in enumerate(decoding_functions)], axis=0)
+
+        return decoded
 
     @staticmethod
     def _get_column_names(encoders):
