@@ -12,6 +12,11 @@ pd.options.display.max_columns = None
 
 class TestDataGenerator(TestCase):
 
+    def __init__(self, methodname):
+        super(TestDataGenerator, self).__init__(methodname)
+        self.path = os.path.dirname(timeseries_ml_utils.test.__file__)
+        self.real_data_df = pd.read_hdf(os.path.join(self.path, "resources", "gld.us.h5"), "GLD_US")
+
     def test___getitem__(self):
         pd.options.display.max_columns = None
 
@@ -29,8 +34,8 @@ class TestDataGenerator(TestCase):
         first_batch = data_generator.__getitem__(0)
 
         # assert window aggregation
-        self.assertEqual(data_generator._aggregate_normalized_window(last_index, [col for col, _ in data_generator.features])[0][-1][-1][-1], 13.)
-        self.assertEqual(data_generator._aggregate_normalized_window(last_index + data_generator.forecast_horizon, [col for col, _ in data_generator.labels])[0][-1][-1][-1], 14.)
+        self.assertEqual(data_generator._aggregate_window(last_index, [col for col, _ in data_generator.features])[0][-1][-1][-1], 13.)
+        self.assertEqual(data_generator._aggregate_window(last_index + data_generator.forecast_horizon, [col for col, _ in data_generator.labels])[0][-1][-1][-1], 14.)
 
         # assert first batch
         self.assertEqual(data_generator.__getitem__(0)[0][0][0][0], 0.)
@@ -239,3 +244,15 @@ class TestDataGenerator(TestCase):
         print(predicted_df)
         predicted_df.plot()
         self.assertTrue(True)
+
+    def test_encode_decode(self):
+        df = self.real_data_df
+        data_generator = DataGenerator(df, {"Volume$": normalize}, {"Volume$": normalize},
+                                       2, 2, 7, 1, training_percentage=1.0, return_sequences=False,
+                                       model_filename=None)
+
+        # 6.1.- 14.1. / 7.1. - 15.1.
+        encoded_labels, indexes = data_generator._get_labels_batch(0)
+        data_generator._get_labels_loc(0)
+        decoded_labels = data_generator._decode_batch(data_generator._get_labels_loc(12), encoded_labels, data_generator.labels)
+        pass

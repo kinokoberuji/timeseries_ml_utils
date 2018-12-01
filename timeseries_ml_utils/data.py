@@ -89,7 +89,10 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.is_test = is_test
 
         # calculate length
-        self.length = len(self.dataframe) - self.batch_size - self.lstm_memory_size + 1 - self.aggregation_window_size + 1 - self.forecast_horizon + 1
+        self.min_needed_data = max(lstm_memory_size, aggregation_window_size)
+        self.min_needed_data_batch = self.min_needed_data + self.batch_size
+        self.min_needed_data_batch_forecast = self.min_needed_data_batch + forecast_horizon
+        self.length = len(self.dataframe) - self.min_needed_data_batch_forecast
 
         # sanity checks
         if len(self.labels) < 1:
@@ -100,7 +103,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
             raise ValueError('Forecast horizon needs to be >= 1')
         if self.aggregation_window_size < 1:
             raise ValueError('Aggregation window needs to be >= 1')
-        if self.length < 1:
+        if self.length < batch_size:
             raise ValueError('Not enough Data for given memory and window sizes: ' + str(self.length))
 
         # derived properties
@@ -112,8 +115,11 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def __len__(self):
         'Denotes the number of batches per epoch'
-        return self.length - int(self.length * self.training_percentage) \
-            if self.is_test else int(self.length * self.training_percentage)
+        cutoff = int(self.length * self.training_percentage)
+        if self.is_test:
+            return self.length - cutoff
+        else:
+            return cutoff
 
     def __getitem__(self, i):
         'Generate one batch of data like [batch_size, lstm_memory_size, features]'
@@ -124,32 +130,39 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def _get_features_batch(self, i, decoders=None):
         # offset index if test set
         features_loc = self._get_features_loc(i)
-        features, index = self._build_matrix(features_loc, decoders or self.features, True)
+        features, index = self._build_matrix(features_loc, features_loc, decoders or self.features, True)
         return features, index
 
     def _get_features_loc(self, i):
         return i + int(self.length * self.training_percentage) if self.is_test else i
 
+    def _get_end_of_features_loc(self, i):
+        return self._get_features_loc(i) + self.min_needed_data
+
     def _get_labels_batch(self, i, decoders=None):
         # offset index if test set
+        features_loc = self._get_features_loc(i)
         labels_loc = self._get_labels_loc(i)
-        labels, index = self._build_matrix(labels_loc, decoders or self.labels, self.return_sequences)
+        labels, index = self._build_matrix(labels_loc, features_loc, decoders or self.labels, self.return_sequences)
         return labels, index
 
     def _get_labels_loc(self, i):
         return self._get_features_loc(i) + self.forecast_horizon
 
-    def _build_matrix(self, loc, column_encoders, is_lstm_aggregate):
+    def _build_matrix(self, loc, ref_loc, column_encoders, is_lstm_aggregate):
         # aggregate windows
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        matrix, index = self._aggregate_normalized_window(loc, AbstractDataGenerator._get_column_names(column_encoders))
+        matrix, index = self._aggregate_window(loc, AbstractDataGenerator._get_column_names(column_encoders))
+
+        # get reference values for encoding
+        ref_values, ref_index = self._get_reference_values(ref_loc, self._get_column_names(column_encoders))
 
         # encode data like normalization
-        matrix = self._encode(loc, matrix, column_encoders)
+        matrix = self._encode(matrix, ref_values, column_encoders)
 
         # concatenate all feature and label vectors into one vector
         # shape = (lstm_memory_size + batch_size, window * feature/label_columns)
-        matrix = self.__concatenate_vectors(matrix)
+        matrix = self._concatenate_vectors(matrix)
 
         # make sliding window of lstm_memory_size
         # shape = (batchsize, lstm_memory_size, window * feature/label_columns)
@@ -159,50 +172,61 @@ class AbstractDataGenerator(keras.utils.Sequence):
         index = [index[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
         return np.array(matrix), index
 
-    def _aggregate_normalized_window(self, loc, columns):
+    def _aggregate_window(self, loc, columns):
         # create data windows
         df = self.dataframe
         window = self.aggregation_window_size
 
-        lstm_range = range(loc, loc + self.lstm_memory_size + self.batch_size - 1)
+        lstm_range = range(loc, loc + self.min_needed_data)
 
         # shape = (columns, lstm_memory_size + batch_size, window)
-        vector = np.array([[df[column].iloc[j:j+window].values
+        matrix = np.array([[df[column].iloc[j:j+window].values
                             for j in lstm_range]
                            for i, column in enumerate(columns)])
 
         index = [df.index[j:j+window].values for j in lstm_range]
-        return vector, index
+        return matrix, index
 
-    def _encode(self, loc, vector, encoding_functions):
+    def _get_reference_values(self, loc, columns):
         df = self.dataframe
+        nr_of_rows = self.min_needed_data
 
-        # fixme -1 is not enough for forecast horizon > 1
-        encoded = np.stack([np.array([func(vector[i][row], df[col].iloc[max(0, loc + row - 1)], True)
-                                      for row in (range(vector.shape[1]))])
+        ref_index = [df.index[max(0, loc + row - 1)] for row in (range(nr_of_rows))]
+        ref_values = [np.array([df[col].iloc[max(0, loc + row - 1)]
+                                for row in (range(nr_of_rows))])
+                      for col in columns]
+
+        ref_values = np.stack(ref_values, axis=0)
+        return ref_values, ref_index
+
+    def _encode(self, aggregate_matrix, reference_values, encoding_functions):
+        encoded = np.stack([np.array([func(aggregate_matrix[i, row], reference_values[i, row], True)
+                                      for row in (range(aggregate_matrix.shape[1]))])
                             for i, (col, func) in enumerate(encoding_functions)], axis=0)
 
         return encoded
 
-    def _decode_batch(self, loc, batch, encoding_functions):
+    def _decode_batch(self, batch, ref_values_index, encoding_functions):
         # return shape (features, batch_size, aggregation_window)
-        return np.hstack([self._decode(1, item, encoding_functions) for item in batch])
+        decoded_batch = np.hstack([self._decode(item, ref_values_index[i][0], encoding_functions)
+                                   for i, item in enumerate(batch)])
 
-    def _decode(self, loc, vector, encoding_functions):
-        df = self.dataframe
+        decoded_indexes = [np.array(i[1]) for i in ref_values_index]
 
+        return decoded_batch, decoded_indexes
+
+    def _decode(self, vector, reference_values, encoding_functions):
         # first reshape a 1D vector into (nr of labels, 1, aggregation window)
         decoded = vector.reshape((len(self.labels), 1, -1))
 
-        # fixme -1 is not enough for forecast horizon > 1
         # now we can decode each row of each column with its associated decoder
-        decoded = np.stack([np.array([func(decoded[i][row], df[col].iloc[max(0, loc + row - 1)], False)
+        decoded = np.stack([np.array([func(decoded[i, row], reference_values[i, row], False)
                                       for row in (range(decoded.shape[1]))])
                             for i, (col, func) in enumerate(encoding_functions)], axis=0)
 
         return decoded
 
-    def __concatenate_vectors(self, array3D):
+    def _concatenate_vectors(self, array3D):
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         return array3D.transpose((1, 0, 2)) \
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
@@ -211,39 +235,46 @@ class AbstractDataGenerator(keras.utils.Sequence):
         length = len(self) + self.batch_size - self.forecast_horizon
 
         # make a prediction
-        prediction = np.hstack([self._decode_batch(self._get_features_loc(batch),
-                                                   batch_predictor(self._get_features_batch(batch)[0]),
-                                                   self.labels)
-                                for batch in range(0, length, self.batch_size)])
+        batches = zip(*[self._back_test_batch(batch, batch_predictor) for batch in range(0, length, self.batch_size)])
+        prediction = np.hstack(batches[0])
+        labels = np.hstack(batches[1])
+        errors = np.hstack(batches[2])
+        r_squares = np.hstack(batches[3])
+
+        stds = None  # np.apply_over_axes(np.std, errors, [1])  # expect errors.shape[0] == labels.shape[1]
+
+        return prediction, labels, r_squares, stds
+
+    def _back_test_batch(self, i,batch_predictor):
+        # make a prediction
+        prediction = self._decode_batch(self._get_labels_loc(i),
+                                        batch_predictor(self._get_features_batch(i)[0]),
+                                        self.labels)
 
         # get the labels.
-        # Note that we doe not want to encode the labels this time so we pass identity encoder and decoder
+        # Note that we do not want to encode the labels this time so we pass identity encoder and decoder
         identity_encoders = [(col, identity) for _, (col, _) in enumerate(self.labels)]
-        labels = np.hstack([self._decode_batch(self._get_labels_loc(batch),
-                                               self._get_labels_batch(batch, identity_encoders)[0],
-                                               identity_encoders)
-                            for batch in range(0, length, self.batch_size)])
+        labels = self._decode_batch(self._get_labels_loc(i),
+                                    self._get_labels_batch(i, identity_encoders)[0],
+                                    identity_encoders)
 
         # calculate errors between prediction and label per value
         errors = prediction - labels
-        stds = np.apply_over_axes(np.std, errors, [1])  # expect errors.shape[0] == labels.shape[1]
-        r_squares = np.array([[r_square(prediction[i, j], labels[i, j])
-                               for j in range(errors.shape[1])]
-                              for i in range(errors.shape[0])])
+        r_squares = np.array([0])
 
-        return prediction, labels, r_squares, stds
+        return prediction, labels, errors, r_squares
 
     @staticmethod
     def _get_column_names(encoders):
         return [col for i, (col, _) in enumerate(encoders)]
 
     def _get_last_features(self, n=-1):
-        loc = self.predictive_length() + n
-        features_batch, index = self._build_matrix(loc, self.features, True)
+        i = self.predictive_length() - self.batch_size + n
+        features_batch, index = self._get_features_batch(i)
         return features_batch[-1], index[-1]
 
     def predictive_length(self):
-        return len(self) + self.forecast_horizon
+        return len(self.dataframe) - self.min_needed_data
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
@@ -253,7 +284,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
 class TestDataGenerator(AbstractDataGenerator):
 
-    def __init__(self, data_generator):
+    def __init__(self, data_generator, training_percentage: float=None):
         super(TestDataGenerator, self).__init__(data_generator.dataframe,
                                                 data_generator.features,
                                                 data_generator.labels,
@@ -261,7 +292,7 @@ class TestDataGenerator(AbstractDataGenerator):
                                                 data_generator.lstm_memory_size,
                                                 data_generator.aggregation_window_size,
                                                 data_generator.forecast_horizon,
-                                                data_generator.training_percentage,
+                                                training_percentage or data_generator.training_percentage,
                                                 data_generator.return_sequences,
                                                 True)
 
@@ -302,7 +333,7 @@ class PredictiveDataGenerator(AbstractDataGenerator):
 
         # for some reason we need to fake a batch for the predict method
         features_batch = np.repeat([features], self.batch_size, axis=0)
-        prediction = self._decode(start_loc_labels, self.model.predict(features_batch)[-1], self.labels)
+        prediction, _ = self._decode(start_loc_labels, self.model.predict(features_batch)[-1], self.labels)
         stop_loc_labels = start_loc_labels + prediction.shape[2]
 
         # calculate timeline for past and predicted values
@@ -316,7 +347,8 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         }, index=timeline)
 
         # join the historic dataframe
-        columns = list(set(self._get_column_names(self.features) + self._get_column_names(self.labels)))
+        # columns = list(set(self._get_column_names(self.features) + self._get_column_names(self.labels)))
+        columns = self._get_column_names(self.labels)
         prediction_df = prediction_df.join(df[columns], how='left')
 
         # todo add upper and lower band
@@ -354,8 +386,8 @@ class DataGenerator(AbstractDataGenerator):
         super(DataGenerator, self).on_epoch_end()
         self.model_filename = model_filename
 
-    def as_test_data_generator(self) -> TestDataGenerator:
-        return TestDataGenerator(self)
+    def as_test_data_generator(self, training_percentage: float=None) -> TestDataGenerator:
+        return TestDataGenerator(self, training_percentage)
 
     def fit(self,
             model: keras.Model,

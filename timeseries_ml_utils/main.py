@@ -21,7 +21,7 @@ if __name__ == "__main__":
     linreg = RegressionLine(16)
 
     # fetch data
-    data = DataFetcher(["GLD.US"], limit=500)
+    data = DataFetcher(["GLD.US"], limit=350)
     data.fetch_data().tail()
 
     print(len(data.get_dataframe()))
@@ -55,3 +55,4 @@ if __name__ == "__main__":
     model_data.fit(model, train_args, frequency=10, relative_accuracy_function=relative_dtw_2, log_dir="/tmp/foo.123/")
 
     predict = model_data.as_predictive_data_generator()
+    predict.predict(-8).plot
