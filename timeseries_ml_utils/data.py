@@ -1,5 +1,6 @@
 import datetime
 import logging
+import math
 import os
 import os.path
 import re
@@ -17,11 +18,11 @@ from .statistics import add_ewma_variance, add_sinusoidal_time, relative_dtw, r_
 
 
 class DataFetcher:
-    '''Fetches data from the web into a pandas data frame and holds it in a file cache'''
+    """Fetches data from the web into a pandas data frame and holds it in a file cache"""
 
     def __init__(self, symbols, data_source="stooq", limit=None, cache_path="./.cache"):
         self.file_name = cache_path + '/' + '_'.join(symbols) + "." + data_source + "." + str(limit) + '.h5'
-        self.symbols  = symbols
+        self.symbols = symbols
         self.data_source = data_source
         self.limit = limit
         self.df_key = 'df'
@@ -89,10 +90,11 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.is_test = is_test
 
         # calculate length
-        self.min_needed_data = max(lstm_memory_size, aggregation_window_size)
-        self.min_needed_data_batch = self.min_needed_data + self.batch_size
+        self.min_needed_data = lstm_memory_size + aggregation_window_size - 1
+        # we need at least one full batch so we need to add the batch size
+        self.min_needed_data_batch = self.min_needed_data + (self.batch_size - 1)
         self.min_needed_data_batch_forecast = self.min_needed_data_batch + forecast_horizon
-        self.length = len(self.dataframe) - self.min_needed_data_batch_forecast
+        self.length = len(self.dataframe) - self.min_needed_data_batch_forecast + 1
 
         # sanity checks
         if len(self.labels) < 1:
@@ -113,9 +115,12 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.batch_feature_shape = item_zero[0].shape
         self.batch_label_shape = item_zero[1].shape
 
+    def get_last_index(self):
+        return len(self) - 1
+
     def __len__(self):
         'Denotes the number of batches per epoch'
-        cutoff = int(self.length * self.training_percentage)
+        cutoff = math.ceil(self.length * self.training_percentage)
         if self.is_test:
             return self.length - cutoff
         else:
@@ -137,12 +142,12 @@ class AbstractDataGenerator(keras.utils.Sequence):
         return i + int(self.length * self.training_percentage) if self.is_test else i
 
     def _get_end_of_features_loc(self, i):
-        return self._get_features_loc(i) + self.min_needed_data
+        return self._get_features_loc(i) + self.aggregation_window_size
 
     def _get_labels_batch(self, i, encoders=None):
         # offset index if test set
-        ref_loc = self._get_end_of_features_loc(i)
         labels_loc = self._get_labels_loc(i)
+        ref_loc = self._get_end_of_features_loc(i)
         labels, index = self._build_matrix(labels_loc, ref_loc, encoders or self.labels, self.return_sequences)
         return labels, index
 
@@ -177,7 +182,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         df = self.dataframe
         window = self.aggregation_window_size
 
-        lstm_range = range(loc, loc + self.min_needed_data)
+        lstm_range = range(loc, loc + self.lstm_memory_size + self.batch_size - 1)
 
         # shape = (columns, lstm_memory_size + batch_size, window)
         matrix = np.array([[df[column].iloc[j:j+window].values
@@ -189,7 +194,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def _get_reference_values(self, loc, columns):
         df = self.dataframe
-        nr_of_rows = self.min_needed_data
+        nr_of_rows = self.aggregation_window_size
 
         ref_index = [df.index[max(0, loc + row - 1)] for row in (range(nr_of_rows))]
         ref_values = [np.array([df[col].iloc[max(0, loc + row - 1)]
@@ -290,12 +295,12 @@ class AbstractDataGenerator(keras.utils.Sequence):
         return [col for i, (col, _) in enumerate(encoders)]
 
     def _get_last_features(self, n=-1):
-        i = self.predictive_length() - self.batch_size + n
+        i = self.predictive_length() + n
         features_batch, index = self._get_features_batch(i)
         return features_batch[-1], index[-1]
 
     def predictive_length(self):
-        return len(self.dataframe) - self.min_needed_data
+        return len(self) + self.forecast_horizon
 
     def on_epoch_end(self):
         'Updates indexes after each epoch'
