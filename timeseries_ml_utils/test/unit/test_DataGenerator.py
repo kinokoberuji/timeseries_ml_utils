@@ -15,20 +15,23 @@ class Test_DataGenerator(TestCase):
 
     def __init__(self, methodName):
         super(Test_DataGenerator, self).__init__(methodName)
+
         self.df = pd.DataFrame({
             "Close": np.arange(1, 21.0),
             "Volume": np.arange(1, 21.0)
         }, index=pd.date_range(start='01.01.2015', periods=20))
-        self.dg = DataGenerator(
-            self.df,
-            {"Close$": identity},
-            {"Close$": identity},
-            batch_size=2,
-            lstm_memory_size=3,
-            aggregation_window_size=4,
-            training_percentage=1.0
-        )
-        self.dg_test = self.dg.as_test_data_generator(0.5)
+
+        if type(self) == Test_DataGenerator:
+            self.dg = DataGenerator(
+                self.df,
+                {"Close$": identity},
+                {"Close$": identity},
+                batch_size=2,
+                lstm_memory_size=3,
+                aggregation_window_size=4,
+                training_percentage=1.0
+            )
+            self.dg_test = self.dg.as_test_data_generator(0.5)
 
     def test_len(self):
         labels_batch, labels_index_batch = self.dg._get_labels_batch(len(self.dg)-1)
@@ -155,32 +158,59 @@ class Test_DataGenerator(TestCase):
         last_index = len(self.dg) - 1
 
         # shape (batch_size, features, lstm_hist, aggregation)
+        features, feature_index = self.dg._get_features_batch(last_index)
         decoded_batch, index, ref_index = self.dg._decode_batch(last_index, lambda x: x[:, -1], self.dg.labels)
-        pass
+        np.testing.assert_array_equal(features[-1, -1], decoded_batch[-1, -1, -1])
 
     def test_back_test_batch(self):
-        prediction, labels, errors, r_squares = self.dg._back_test_batch(0, lambda x: np.repeat(x[-1], len(x)))
-        pass
+        prediction, labels, errors, r_squares = self.dg._back_test_batch(0, lambda x: x[:, -1])
+        expected = labels[-1] - self.dg.forecast_horizon
+        np.testing.assert_array_equal(expected, prediction[-1, -1, -1])
 
-    def backtest(self):
-        # since we normalize we denormalize using (1 + x) * ref value which equals to the ref_value
-        self.dg.back_test(lambda x: np.repeat(x[-1], len(x)))
+    def test_backtest(self):
+        prediction, labels, r_squares, stds = self.dg.back_test(lambda x: x[:, -1])
+        expected_len = (len(self.df) - self.dg.min_needed_data) / 2
+        self.assertEqual(expected_len, prediction.shape[1])
 
-        pass
 
-
-class Test_DataGenerator2(Test_DataGenerator):
+class Test_DataGenerator_aggregation1(Test_DataGenerator):
 
     def __init__(self, method_name):
-        s = super(Test_DataGenerator2, self)
-        s.__init__(method_name)
-        s.dg = DataGenerator(
+        super(Test_DataGenerator_aggregation1, self).__init__(method_name)
+        self.dg = DataGenerator(
+            self.df,
+            {"Close$": identity},
+            {"Close$": identity},
+            batch_size=1,
+            lstm_memory_size=1,
+            aggregation_window_size=1,
+            training_percentage=1.0
+        )
+        self.dg_test = self.dg.as_test_data_generator(0.5)
+
+
+class Test_DataGenerator_swapped_lstm_batch_size(Test_DataGenerator):
+
+    def __init__(self, method_name):
+        super(Test_DataGenerator_swapped_lstm_batch_size, self).__init__(method_name)
+        self.dg = DataGenerator(
             self.df,
             {"Close$": normalize},
             {"Close$": normalize},
             batch_size=2,
-            lstm_memory_size=3,
-            aggregation_window_size=4,
+            lstm_memory_size=4,
+            aggregation_window_size=3,
             training_percentage=1.0
         )
         self.dg_test = self.dg.as_test_data_generator(0.5)
+
+    def test_switched_shape(self):
+        self.assertEqual((self.dg.batch_size, self.dg.lstm_memory_size, self.dg.aggregation_window_size),
+                         self.dg.batch_feature_shape)
+
+
+# TODO change label ref loc to be feature end loc
+# TODO make a test of a plain vanilla case of window 1, forecast 1 and log returns -> test length and prediction_length - fix preditive length
+# TODO allow forecast wirndow 0, try to leaarn linear regression
+# TODO make a test set for return_sequence = True
+# TODO test multiple features

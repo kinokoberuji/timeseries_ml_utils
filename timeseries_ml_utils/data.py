@@ -99,8 +99,8 @@ class AbstractDataGenerator(keras.utils.Sequence):
             raise ValueError('No labels defined')
         if len(self.features) < 1:
             raise ValueError('No features defined')
-        if self.forecast_horizon < 1:
-            raise ValueError('Forecast horizon needs to be >= 1')
+        if self.forecast_horizon < 0:
+            raise ValueError('Forecast horizon needs to be >= 0')
         if self.aggregation_window_size < 1:
             raise ValueError('Aggregation window needs to be >= 1')
         if self.length < batch_size:
@@ -127,10 +127,10 @@ class AbstractDataGenerator(keras.utils.Sequence):
         labels_batch, _ = self._get_labels_batch(i, self.labels)
         return features_batch, labels_batch
 
-    def _get_features_batch(self, i, decoders=None):
+    def _get_features_batch(self, i, encoders=None):
         # offset index if test set
         features_loc = self._get_features_loc(i)
-        features, index = self._build_matrix(features_loc, features_loc, decoders or self.features, True)
+        features, index = self._build_matrix(features_loc, features_loc, encoders or self.features, True)
         return features, index
 
     def _get_features_loc(self, i):
@@ -139,11 +139,11 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def _get_end_of_features_loc(self, i):
         return self._get_features_loc(i) + self.min_needed_data
 
-    def _get_labels_batch(self, i, decoders=None):
+    def _get_labels_batch(self, i, encoders=None):
         # offset index if test set
         features_loc = self._get_features_loc(i)
         labels_loc = self._get_labels_loc(i)
-        labels, index = self._build_matrix(labels_loc, features_loc, decoders or self.labels, self.return_sequences)
+        labels, index = self._build_matrix(labels_loc, features_loc, encoders or self.labels, self.return_sequences)
         return labels, index
 
     def _get_labels_loc(self, i):
@@ -215,7 +215,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
         length = len(self) + self.batch_size - self.forecast_horizon
 
         # make a prediction
-        batches = zip(*[self._back_test_batch(batch, batch_predictor) for batch in range(0, length, self.batch_size)])
+        batches = list(zip(*[self._back_test_batch(batch, batch_predictor)
+                             for batch in range(0, length, self.batch_size)]))
+
         prediction = np.hstack(batches[0])
         labels = np.hstack(batches[1])
         errors = np.hstack(batches[2])
@@ -225,18 +227,14 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return prediction, labels, r_squares, stds
 
-    def _back_test_batch(self, i,batch_predictor):
+    def _back_test_batch(self, i, batch_predictor):
         # make a prediction
-        prediction = self._decode_batch(self._get_labels_loc(i),
-                                        batch_predictor(self._get_features_batch(i)[0]),
-                                        self.labels)
+        prediction, _, _ = self._decode_batch(i, batch_predictor, self.labels, self.return_sequences)
 
         # get the labels.
         # Note that we do not want to encode the labels this time so we pass identity encoder and decoder
         identity_encoders = [(col, identity) for _, (col, _) in enumerate(self.labels)]
-        labels = self._decode_batch(self._get_labels_loc(i),
-                                    self._get_labels_batch(i, identity_encoders)[0],
-                                    identity_encoders)
+        labels, _ = self._get_labels_batch(i, identity_encoders)
 
         # calculate errors between prediction and label per value
         errors = prediction - labels
