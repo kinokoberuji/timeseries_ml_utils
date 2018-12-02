@@ -127,12 +127,12 @@ class Test_DataGenerator(TestCase):
 
     def test_get_labels_batch(self):
         last_index = len(self.dg) - 1
+        features_ref_encoders = [(col, lambda x, ref, _: np.repeat(x[-1], len(x))) for col, _ in self.dg.labels]
         decoders = [(col, lambda x, ref, _: np.repeat(ref, len(x))) for col, _ in self.dg.labels]
-        features_batch, features_index = self.dg._get_features_batch(last_index)
-        features_ref_batch, _ = self.dg._get_features_batch(last_index, decoders)
+
+        features_ref_batch, _ = self.dg._get_features_batch(last_index, features_ref_encoders)
         labels_batch, labels_index = self.dg._get_labels_batch(last_index, decoders)
 
-        self.assertEqual(features_batch[-1, -2, 0], features_ref_batch[-1, -1, 0])
         self.assertEqual(features_ref_batch[-1, -1, 0], labels_batch[-1, -1])
         self.assertEqual(self.df.index[-1], pd.Timestamp(labels_index[-1][-1]))
 
@@ -195,8 +195,8 @@ class Test_DataGenerator_swapped_lstm_batch_size(Test_DataGenerator):
         super(Test_DataGenerator_swapped_lstm_batch_size, self).__init__(method_name)
         self.dg = DataGenerator(
             self.df,
-            {"Close$": normalize},
-            {"Close$": normalize},
+            {"Close$": identity},
+            {"Close$": identity},
             batch_size=2,
             lstm_memory_size=4,
             aggregation_window_size=3,

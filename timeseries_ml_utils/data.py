@@ -141,9 +141,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def _get_labels_batch(self, i, encoders=None):
         # offset index if test set
-        features_loc = self._get_features_loc(i)
+        ref_loc = self._get_end_of_features_loc(i)
         labels_loc = self._get_labels_loc(i)
-        labels, index = self._build_matrix(labels_loc, features_loc, encoders or self.labels, self.return_sequences)
+        labels, index = self._build_matrix(labels_loc, ref_loc, encoders or self.labels, self.return_sequences)
         return labels, index
 
     def _get_labels_loc(self, i):
@@ -257,7 +257,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         return decoded_batch, index, batch_ref_index
 
     def _get_decode_ref_values(self, i, columns, is_lstm_aggregate=False):
-        ref_loc = self._get_features_loc(i)
+        ref_loc = self._get_end_of_features_loc(i)
         ref_values, ref_index = self._get_reference_values(ref_loc, columns)
 
         # now we need to reshape the reference values to fit the batch and lstm sizes
