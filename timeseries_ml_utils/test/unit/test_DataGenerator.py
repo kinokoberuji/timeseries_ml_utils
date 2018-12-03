@@ -163,9 +163,21 @@ class Test_DataGenerator(TestCase):
         np.testing.assert_array_equal(expected, prediction[-1, -1, -1])
 
     def test_backtest(self):
+        column_decoders = [(col, lambda x, ref, _: np.repeat(ref, len(x))) for col, _ in self.dg.labels]
+        first_batch_features, first_batch_labels = self.dg[0]
+        last_batch_features, last_batch_labels = self.dg[self.dg.get_last_index()]
+
+        # the last value of the features needs to equal the ref value of the decoder
+        prediction_ref, labels_ref, _, _ = self.dg.back_test(lambda x: x[:, -1], column_decoders)
+        self.assertEqual(first_batch_features[0, -1, -1], prediction_ref[0, 0, 0, -1])
+        self.assertEqual(last_batch_features[-1, -1, -1], prediction_ref[0, -1, 0, -1])
+
+        # the prediction is just the last window of the feattures
         prediction, labels, r_squares, stds = self.dg.back_test(lambda x: x[:, -1])
-        expected_len = (len(self.df) - self.dg.min_needed_data) / 2
-        self.assertEqual(expected_len, prediction.shape[1])
+        np.testing.assert_array_equal(first_batch_features[0, -1], prediction[0, 0, 0])
+        np.testing.assert_array_equal(last_batch_features[-1, -1], prediction[-1, -1, -1])
+
+        np.testing.assert_array_equal(last_batch_labels[-1], labels[-1, -1])
 
 
 class Test_DataGenerator_aggregation1(Test_DataGenerator):
@@ -218,8 +230,6 @@ class Test_DataGenerator_aggregation1(Test_DataGenerator):
 #                          self.dg.batch_feature_shape)
 
 
-# TODO change label ref loc to be feature end loc
-# TODO make a test of a plain vanilla case of window 1, forecast 1 and log returns -> test length and prediction_length - fix preditive length
 # TODO allow forecast wirndow 0, try to leaarn linear regression
 # TODO make a test set for return_sequence = True
 # TODO test multiple features

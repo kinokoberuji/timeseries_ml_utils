@@ -216,25 +216,28 @@ class AbstractDataGenerator(keras.utils.Sequence):
         return array3D.transpose((1, 0, 2)) \
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
 
-    def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        length = len(self) + self.batch_size - self.forecast_horizon
+    def back_test(self,
+                  batch_predictor: Callable[[np.ndarray], np.ndarray],
+                  column_decoders: List[Tuple[str, Callable[[np.ndarray, float], np.ndarray]]] = None
+                  )-> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        length = len(self)
 
         # make a prediction
-        batches = list(zip(*[self._back_test_batch(batch, batch_predictor)
-                             for batch in range(0, length, self.batch_size)]))
+        batches = list(zip(*[self._back_test_batch(batch, batch_predictor, column_decoders)
+                             for batch in range(length)]))
 
         prediction = np.hstack(batches[0])
-        labels = np.hstack(batches[1])
-        errors = np.hstack(batches[2])
-        r_squares = np.hstack(batches[3])
+        labels = np.stack(batches[1], axis=0)
+        errors = np.stack(batches[2], axis=0)
+        r_squares = np.stack(batches[3], axis=0)
 
         stds = None  # np.apply_over_axes(np.std, errors, [1])  # expect errors.shape[0] == labels.shape[1]
 
         return prediction, labels, r_squares, stds
 
-    def _back_test_batch(self, i, batch_predictor):
+    def _back_test_batch(self, i, batch_predictor, decoders):
         # make a prediction
-        prediction, _, _ = self._decode_batch(i, batch_predictor, self.labels, self.return_sequences)
+        prediction, _, _ = self._decode_batch(i, batch_predictor, decoders or self.labels, self.return_sequences)
 
         # get the labels.
         # Note that we do not want to encode the labels this time so we pass identity encoder and decoder
