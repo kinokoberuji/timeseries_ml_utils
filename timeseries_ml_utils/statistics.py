@@ -84,3 +84,7 @@ def add_sinusoidal_time(df):
     df["trigonometric_time.sin_dec"] = np.sin(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
     df["trigonometric_time.cos_dec"] = np.cos(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
     return df
+
+
+class BackTestHistory(object):
+    pass

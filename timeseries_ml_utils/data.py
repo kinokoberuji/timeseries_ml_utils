@@ -5,7 +5,7 @@ import os
 import os.path
 import re
 from typing import List, Dict, Callable, Tuple
-
+from sklearn.metrics import r2_score
 import keras
 import numpy as np
 import pandas as pd
@@ -237,20 +237,24 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def _back_test_batch(self, i, batch_predictor, decoders):
         # make a prediction
-        prediction, _, _ = self._decode_batch(i, batch_predictor, decoders or self.labels, self.return_sequences)
+        prediction, _, _ = self._decode_batch(i, batch_predictor, decoders or self.labels)
 
         # get the labels.
         # Note that we do not want to encode the labels this time so we pass identity encoder and decoder
         identity_encoders = [(col, identity) for _, (col, _) in enumerate(self.labels)]
-        labels, _ = self._get_labels_batch(i, identity_encoders)
+        labels, _, _ = self._decode_batch(i, lambda _: self._get_labels_batch(i, identity_encoders)[0],
+                                          identity_encoders)
 
         # calculate errors between prediction and label per value
-        errors = prediction - labels
-        r_squares = np.array([0])
+        errors = prediction - labels  # FIXME
+
+        # calculate an r2 for each batch and each lstm output sequence
+        r_squares = np.reshape([r2_score(labels[i], prediction[i]) for i in np.ndindex(prediction.shape[:-1])],
+                               prediction.shape[:-1])
 
         return prediction, labels, errors, r_squares
 
-    def _decode_batch(self, i, predictor_function, decoding_functions, is_lstm_aggregate=False):
+    def _decode_batch(self, i, predictor_function, decoding_functions):
         # get values
         features, index = self._get_features_batch(i)
         prediction = predictor_function(features)
@@ -264,12 +268,12 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         return decoded_batch, index, batch_ref_index
 
-    def _get_decode_ref_values(self, i, columns, is_lstm_aggregate=False):
+    def _get_decode_ref_values(self, i, columns, is_lstm_return_sequence=False):
         ref_loc = self._get_end_of_features_loc(i)
         ref_values, ref_index = self._get_reference_values(ref_loc, columns)
 
         # now we need to reshape the reference values to fit the batch and lstm sizes
-        if is_lstm_aggregate:
+        if is_lstm_return_sequence:
             batch_ref_values = [[ref_values[col, i:i + self.lstm_memory_size]
                                  for col in range(len(columns))]
                                 for i in range(self.batch_size)]

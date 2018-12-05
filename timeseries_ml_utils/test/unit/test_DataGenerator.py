@@ -159,7 +159,8 @@ class Test_DataGenerator(TestCase):
 
     def test_back_test_batch(self):
         prediction, labels, errors, r_squares = self.dg._back_test_batch(0, lambda x: x[:, -1], self.dg.labels)
-        expected = labels[-1] - self.dg.forecast_horizon
+        expected = labels[-1, -1, -1] - self.dg.forecast_horizon
+        self.assertEqual(prediction.shape, labels.shape)
         np.testing.assert_array_equal(expected, prediction[-1, -1, -1])
 
     def test_backtest(self):
