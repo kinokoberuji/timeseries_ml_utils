@@ -173,12 +173,16 @@ class Test_DataGenerator(TestCase):
         self.assertEqual(first_batch_features[0, -1, -1], prediction_ref[0, 0, 0, -1])
         self.assertEqual(last_batch_features[-1, -1, -1], prediction_ref[0, -1, 0, -1])
 
-        # the prediction is just the last window of the feattures
+        # get the prediction
         prediction, labels, r_squares, stds = self.dg.back_test(lambda x: x[:, -1])
+
+        # the prediction and the labels need to ha the same shape (features, sample, lstm hist, aggregation window)
+        self.assertEqual(prediction.shape, labels.shape)
+
+        # the prediction is just the last window of the features
         np.testing.assert_array_equal(first_batch_features[0, -1], prediction[0, 0, 0])
         np.testing.assert_array_equal(last_batch_features[-1, -1], prediction[-1, -1, -1])
-
-        np.testing.assert_array_equal(last_batch_labels[-1], labels[-1, -1])
+        np.testing.assert_array_equal(last_batch_labels[-1], labels[-1, -1, -1])
 
 
 class Test_DataGenerator_aggregation1(Test_DataGenerator):

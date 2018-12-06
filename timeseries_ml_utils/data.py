@@ -227,9 +227,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
                              for batch in range(length)]))
 
         prediction = np.hstack(batches[0])
-        labels = np.stack(batches[1], axis=0)
-        errors = np.stack(batches[2], axis=0)
-        r_squares = np.stack(batches[3], axis=0)
+        labels = np.hstack(batches[1])
+        errors = np.hstack(batches[2])
+        r_squares = np.hstack(batches[3])
 
         stds = None  # np.apply_over_axes(np.std, errors, [1])  # expect errors.shape[0] == labels.shape[1]
 
