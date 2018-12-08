@@ -2,6 +2,7 @@ from scipy.fftpack import dct
 from random import randint
 from fastdtw import fastdtw
 import matplotlib.pyplot as plt
+import scipy.stats as st
 import pandas as pd
 import numpy as np
 import math
@@ -90,13 +91,20 @@ def add_sinusoidal_time(df):
 
 class BackTestHistory(object):
 
-    def __init__(self, column_names, predictions, labels, r_squares, standard_deviations):
+    def __init__(self, column_names, predictions, labels, r_squares, standard_deviations, confidence=.80):
         self.column_names = column_names
         self.predictions = predictions
         self.labels = labels
         self.r_squares = r_squares
         self.standard_deviations = standard_deviations
-        self.confidence = 1.5
+        self.confidence = self._get_confidence_factor(confidence)
+
+    def set_confidence(self, confidence=.80):
+        self.confidence = self._get_confidence_factor(confidence)
+
+    @staticmethod
+    def _get_confidence_factor(confidence):
+        return st.norm.ppf(confidence) if confidence is not None else 0
 
     def get_measures(self):
         return self.predictions, self.labels, self.r_squares, self.standard_deviations
@@ -111,10 +119,12 @@ class BackTestHistory(object):
         for i, label in enumerate(self.column_names):
             y = self.labels[i, j, -1]
             y_hat = self.predictions[i, j, -1]
-            upper = y_hat + self.confidence * self.standard_deviations
-            lower = y_hat - self.confidence * self.standard_deviations
 
-            plt.fill_between(range(y_hat.shape[0]), upper, lower, alpha=.5)
+            if self.confidence > 0:
+                upper = y_hat + self.confidence * self.standard_deviations
+                lower = y_hat - self.confidence * self.standard_deviations
+                plt.fill_between(range(y_hat.shape[0]), upper, lower, alpha=.5)
+
             plt.plot(y_hat, label='predict')
             plt.plot(y, label='label')
             plt.legend(loc='best')
