@@ -90,7 +90,8 @@ def add_sinusoidal_time(df):
 
 class BackTestHistory(object):
 
-    def __init__(self, predictions, labels, r_squares, standard_deviations):
+    def __init__(self, column_names, predictions, labels, r_squares, standard_deviations):
+        self.column_names = column_names
         self.predictions = predictions
         self.labels = labels
         self.r_squares = r_squares
@@ -103,10 +104,13 @@ class BackTestHistory(object):
         pass
 
     def plot_random_sample(self):
-        i = randint(0, len(self.predictions))
+        j = randint(0, self.predictions.shape[1])
         fig = plt.figure()
-        plt.plot([], label='predict')
-        plt.plot([], label='label')
-        plt.legend(loc='best')
-        plt.title("{}, {:.2f}".format("title", 0.))
+
+        for i, label in enumerate(self.column_names):
+            plt.plot(self.predictions[i, j, -1], label='predict')
+            plt.plot(self.labels[i, j, -1], label='label')
+            plt.legend(loc='best')
+            plt.title("{}: {}, r2={:.2f}".format(j, label, 0.))
+
         return fig

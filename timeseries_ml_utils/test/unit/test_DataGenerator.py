@@ -32,6 +32,8 @@ class Test_DataGenerator(TestCase):
             )
             self.dg_test = self.dg.as_test_data_generator(0.5)
 
+        self.last_lstm_features_lambda = lambda x: x[:, -1, -self.dg.aggregation_window_size * len(self.dg.labels):]
+
     def test_len(self):
         labels_batch, labels_index_batch = self.dg._get_labels_batch(self.dg.get_last_index())
         self.assertEqual(self.df.index[-1], pd.Timestamp(labels_index_batch[-1][-1]))
@@ -157,7 +159,7 @@ class Test_DataGenerator(TestCase):
         np.testing.assert_array_equal(features[-1, -1], decoded_batch[-1, -1, -1])
 
     def test_back_test_batch(self):
-        prediction, labels, errors, r_squares = self.dg._back_test_batch(0, lambda x: x[:, -1], self.dg.labels)
+        prediction, labels, errors, r_squares = self.dg._back_test_batch(0, self.last_lstm_features_lambda, self.dg.labels)
         expected = labels[-1, -1, -1] - self.dg.forecast_horizon
         self.assertEqual(prediction.shape, labels.shape)
         np.testing.assert_array_equal(expected, prediction[-1, -1, -1])
@@ -168,7 +170,7 @@ class Test_DataGenerator(TestCase):
         last_batch_features, last_batch_labels = self.dg[self.dg.get_last_index()]
 
         # get the prediction where we just use the last set of features (window aggregated)
-        prediction, labels, r_squares, stds = self.dg.back_test(lambda x: x[:, -1]).get_measures()
+        prediction, labels, r_squares, stds = self.dg.back_test(self.last_lstm_features_lambda).get_measures()
 
         # the prediction and the labels need to ha the same shape (features, sample, lstm hist, aggregation window)
         # we need as many prediction s we have elements
@@ -181,7 +183,7 @@ class Test_DataGenerator(TestCase):
         np.testing.assert_array_equal(last_batch_labels[-1], labels[-1, -1, -1])
 
         # if we use the last value of the features as prediction
-        prediction_ref, labels_ref, _, _ = self.dg.back_test(lambda x: x[:, -1], ref_value_decoders).get_measures()
+        prediction_ref, labels_ref, _, _ = self.dg.back_test(self.last_lstm_features_lambda, ref_value_decoders).get_measures()
 
         # then the last value of any batch (first,, last) of features needs to equal the ref value of the prediction
         self.assertEqual(first_batch_features[0, -1, -1], prediction_ref[0, 0, 0, -1])
@@ -265,6 +267,38 @@ class Test_DataGenerator_swapped_lstm_batch_size(Test_DataGenerator):
 
     def test_decode(self):
         pass
+
+
+class Test_DataGenerator_multiple_features(Test_DataGenerator):
+
+    def __init__(self, method_name):
+        super(Test_DataGenerator_multiple_features, self).__init__(method_name)
+        self.dg = DataGenerator(
+            self.df,
+            {"(Close|Volume)$": identity},
+            {"Close$": identity},
+            batch_size=2,
+            lstm_memory_size=4,
+            aggregation_window_size=3,
+            training_percentage=1.0
+        )
+        self.dg_test = self.dg.as_test_data_generator(0.5)
+
+    def test_concatenate_vectors(self):
+        pass
+
+    def test_decode(self):
+        pass
+
+    def test_backtest(self):
+        # get the prediction where we just use the last set of features (window aggregated)
+        prediction, labels, r_squares, stds = self.dg.back_test(self.last_lstm_features_lambda).get_measures()
+
+        # the prediction and the labels need to ha the same shape (features, sample, lstm hist, aggregation window)
+        # we need as many prediction s we have elements
+        self.assertEqual(prediction.shape, labels.shape)
+        # FIXME self.assertEqual(len(self.dg), prediction.shape[1])
+
 
 # TODO allow forecast wirndow 0, try to leaarn linear regression
 # TODO make a test set for return_sequence = True
