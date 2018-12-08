@@ -96,6 +96,7 @@ class BackTestHistory(object):
         self.labels = labels
         self.r_squares = r_squares
         self.standard_deviations = standard_deviations
+        self.confidence = 1.5
 
     def get_measures(self):
         return self.predictions, self.labels, self.r_squares, self.standard_deviations
@@ -108,8 +109,14 @@ class BackTestHistory(object):
         fig = plt.figure()
 
         for i, label in enumerate(self.column_names):
-            plt.plot(self.predictions[i, j, -1], label='predict')
-            plt.plot(self.labels[i, j, -1], label='label')
+            y = self.labels[i, j, -1]
+            y_hat = self.predictions[i, j, -1]
+            upper = y_hat + self.confidence * self.standard_deviations
+            lower = y_hat - self.confidence * self.standard_deviations
+
+            plt.fill_between(range(y_hat.shape[0]), upper, lower, alpha=.5)
+            plt.plot(y_hat, label='predict')
+            plt.plot(y, label='label')
             plt.legend(loc='best')
             plt.title("{}: {}, r2={:.2f}".format(j, label, 0.))
 
