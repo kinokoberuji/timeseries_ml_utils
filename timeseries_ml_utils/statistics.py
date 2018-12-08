@@ -1,9 +1,11 @@
-from fastdtw import fastdtw
 from scipy.fftpack import dct
-import math
-import re
+from random import randint
+from fastdtw import fastdtw
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import math
+import re
 
 
 def dct_distance(x, y):
@@ -87,4 +89,24 @@ def add_sinusoidal_time(df):
 
 
 class BackTestHistory(object):
-    pass
+
+    def __init__(self, predictions, labels, r_squares, standard_deviations):
+        self.predictions = predictions
+        self.labels = labels
+        self.r_squares = r_squares
+        self.standard_deviations = standard_deviations
+
+    def get_measures(self):
+        return self.predictions, self.labels, self.r_squares, self.standard_deviations
+    
+    def hist(self):
+        pass
+
+    def plot_random_sample(self):
+        i = randint(0, len(self.predictions))
+        fig = plt.figure()
+        plt.plot([], label='predict')
+        plt.plot([], label='label')
+        plt.legend(loc='best')
+        plt.title("{}, {:.2f}".format("title", 0.))
+        return fig

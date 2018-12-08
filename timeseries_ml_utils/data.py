@@ -14,7 +14,7 @@ from pandas_datareader import DataReader
 
 from timeseries_ml_utils.encoders import identity
 from .callbacks import RelativeAccuracy
-from .statistics import add_ewma_variance, add_sinusoidal_time, relative_dtw, r_square
+from .statistics import add_ewma_variance, add_sinusoidal_time, relative_dtw, r_square, BackTestHistory
 
 
 class DataFetcher:
@@ -91,6 +91,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         # calculate length
         self.min_needed_data = lstm_memory_size + aggregation_window_size - 1
+        self.min_needed_aggregation_data = self.lstm_memory_size + self.batch_size - 1
         # we need at least one full batch so we need to add the batch size
         self.min_needed_data_batch = self.min_needed_data + (self.batch_size - 1)
         self.min_needed_data_batch_forecast = self.min_needed_data_batch + forecast_horizon
@@ -117,6 +118,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def get_last_index(self):
         return len(self) - 1
+
+    def get_all_batches(self):
+        return [sample for i in range(len(self)) for sample in self[i]]
 
     def __len__(self):
         'Denotes the number of batches per epoch'
@@ -182,7 +186,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         df = self.dataframe
         window = self.aggregation_window_size
 
-        lstm_range = range(loc, loc + self.lstm_memory_size + self.batch_size - 1)
+        lstm_range = range(loc, loc + self.min_needed_aggregation_data)
 
         # shape = (columns, lstm_memory_size + batch_size, window)
         matrix = np.array([[df[column].iloc[j:j+window].values
@@ -194,7 +198,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def _get_reference_values(self, loc, columns):
         df = self.dataframe
-        nr_of_rows = self.aggregation_window_size
+        nr_of_rows = self.min_needed_aggregation_data
 
         ref_index = [df.index[max(0, loc + row - 1)] for row in (range(nr_of_rows))]
         ref_values = [np.array([df[col].iloc[max(0, loc + row - 1)]
@@ -219,7 +223,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def back_test(self,
                   batch_predictor: Callable[[np.ndarray], np.ndarray],
                   column_decoders: List[Tuple[str, Callable[[np.ndarray, float], np.ndarray]]] = None
-                  )-> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+                  )-> BackTestHistory:
         length = len(self)
 
         # make a prediction
@@ -228,14 +232,14 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         prediction = np.hstack(batches[0])
         labels = np.hstack(batches[1])
-        errors = np.hstack(batches[2])
+        errors = np.hstack(batches[2])  # FIXME
         r_squares = np.hstack(batches[3])
 
-        stds = None  # np.apply_over_axes(np.std, errors, [1])  # expect errors.shape[0] == labels.shape[1]
+        stds = None  # FIXME np.apply_over_axes(np.std, errors, [1])  # expect errors.shape[0] == labels.shape[1]
 
-        return prediction, labels, r_squares, stds
+        return BackTestHistory(prediction, labels, r_squares, stds)
 
-    def _back_test_batch(self, i, batch_predictor, decoders):
+    def _back_test_batch(self, i, batch_predictor, decoders=None):
         # make a prediction
         prediction, _, _ = self._decode_batch(i, batch_predictor, decoders or self.labels)
 
@@ -246,7 +250,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
                                           identity_encoders)
 
         # calculate errors between prediction and label per value
-        errors = prediction - labels  # FIXME
+        errors = prediction - labels  # FIXME do something like errors[,:].std()
 
         # calculate an r2 for each batch and each lstm output sequence
         r_squares = np.reshape([r2_score(labels[i], prediction[i]) for i in np.ndindex(prediction.shape[:-1])],

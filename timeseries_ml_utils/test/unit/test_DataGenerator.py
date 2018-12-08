@@ -1,12 +1,11 @@
+import unittest
 from unittest import TestCase
-from random import randint
+
+import numpy as np
+import pandas as pd
+
 from timeseries_ml_utils.data import DataGenerator
 from timeseries_ml_utils.encoders import *
-import timeseries_ml_utils.test
-import pandas as pd
-import numpy as np
-import unittest
-import os
 
 pd.options.display.max_columns = None
 
@@ -97,9 +96,9 @@ class Test_DataGenerator(TestCase):
 
     def test_concatenate_vectors(self):
         # turn shape (features, batch/lstm size, window) into (batch/lstm size, features * window)
-        input = np.array([[[1, 2, 3, 4], [1, 2, 3, 4]],[[1, 2, 3, 4], [1, 2, 3, 4]]])
-        expected = np.array([[1, 2, 3, 4, 1, 2, 3, 4], [1, 2, 3, 4, 1, 2, 3, 4]])
-        np.testing.assert_array_equal(expected, self.dg._concatenate_vectors(input))
+        separated_columns = np.array([[[1, 2, 3, 4], [1, 2, 3, 4]], [[1, 2, 3, 4], [1, 2, 3, 4]]])
+        concatenated_columns = np.array([[1, 2, 3, 4, 1, 2, 3, 4], [1, 2, 3, 4, 1, 2, 3, 4]])
+        np.testing.assert_array_equal(concatenated_columns, self.dg._concatenate_vectors(separated_columns))
 
     def test_build_matrix(self):
         floc = self.dg._get_features_loc(0)
@@ -164,25 +163,52 @@ class Test_DataGenerator(TestCase):
         np.testing.assert_array_equal(expected, prediction[-1, -1, -1])
 
     def test_backtest(self):
-        column_decoders = [(col, lambda x, ref, _: np.repeat(ref, len(x))) for col, _ in self.dg.labels]
+        ref_value_decoders = [(col, lambda x, ref, _: np.repeat(ref, len(x))) for col, _ in self.dg.labels]
         first_batch_features, first_batch_labels = self.dg[0]
         last_batch_features, last_batch_labels = self.dg[self.dg.get_last_index()]
 
-        # the last value of the features needs to equal the ref value of the decoder
-        prediction_ref, labels_ref, _, _ = self.dg.back_test(lambda x: x[:, -1], column_decoders)
-        self.assertEqual(first_batch_features[0, -1, -1], prediction_ref[0, 0, 0, -1])
-        self.assertEqual(last_batch_features[-1, -1, -1], prediction_ref[0, -1, 0, -1])
-
-        # get the prediction
-        prediction, labels, r_squares, stds = self.dg.back_test(lambda x: x[:, -1])
+        # get the prediction where we just use the last set of features (window aggregated)
+        prediction, labels, r_squares, stds = self.dg.back_test(lambda x: x[:, -1]).get_measures()
 
         # the prediction and the labels need to ha the same shape (features, sample, lstm hist, aggregation window)
+        # we need as many prediction s we have elements
         self.assertEqual(prediction.shape, labels.shape)
+        # FIXME self.assertEqual(len(self.dg), prediction.shape[1])
 
         # the prediction is just the last window of the features
         np.testing.assert_array_equal(first_batch_features[0, -1], prediction[0, 0, 0])
         np.testing.assert_array_equal(last_batch_features[-1, -1], prediction[-1, -1, -1])
         np.testing.assert_array_equal(last_batch_labels[-1], labels[-1, -1, -1])
+
+        # if we use the last value of the features as prediction
+        prediction_ref, labels_ref, _, _ = self.dg.back_test(lambda x: x[:, -1], ref_value_decoders).get_measures()
+
+        # then the last value of any batch (first,, last) of features needs to equal the ref value of the prediction
+        self.assertEqual(first_batch_features[0, -1, -1], prediction_ref[0, 0, 0, -1])
+        self.assertEqual(last_batch_features[-1, -1, -1], prediction_ref[0, -1, 0, -1])
+
+    @unittest.skip("Currently not correctly implemented")
+    def test_full_set(self):
+        all_batches = self.dg.get_all_batches()
+        prediction, labels, r_squares, stds = self.dg.back_test(lambda x: x[:, -1]).get_measures()
+
+        # we need as many samples as the length is
+        self.assertEqual(len(self.dg), len(all_batches))
+        self.assertEqual(len(self.dg), prediction.shape[1])
+
+        # the shapes need to match the specs
+        expected_features_shape = (self.dg.lstm_memory_size, self.dg.aggregation_window_size * len(self.dg.features))
+        expected_labels_shape = (self.dg.lstm_memory_size if self.dg.return_sequences else 1,
+                                 self.dg.aggregation_window_size * len(self.dg.labels))
+
+        self.assertEqual(all_batches[0].shape, expected_features_shape)
+        self.assertEqual(all_batches[1].shape, expected_labels_shape)
+        self.assertEqual(labels[-1, -1].shape, expected_labels_shape)
+        self.assertEqual(prediction[-1, -1].shape, expected_labels_shape)
+
+        # the first ant the last values need to match
+        self.assertEqual(self.df["Close"][0], all_batches[0, 0, 0])
+        self.assertEqual(self.df["Close"][-1], all_batches[-1, -1, -1])
 
 
 class Test_DataGenerator_aggregation1(Test_DataGenerator):
@@ -215,25 +241,30 @@ class Test_DataGenerator_aggregation1(Test_DataGenerator):
         pass
 
 
-# class Test_DataGenerator_swapped_lstm_batch_size(Test_DataGenerator):
-#
-#     def __init__(self, method_name):
-#         super(Test_DataGenerator_swapped_lstm_batch_size, self).__init__(method_name)
-#         self.dg = DataGenerator(
-#             self.df,
-#             {"Close$": identity},
-#             {"Close$": identity},
-#             batch_size=2,
-#             lstm_memory_size=4,
-#             aggregation_window_size=3,
-#             training_percentage=1.0
-#         )
-#         self.dg_test = self.dg.as_test_data_generator(0.5)
-#
-#     def test_switched_shape(self):
-#         self.assertEqual((self.dg.batch_size, self.dg.lstm_memory_size, self.dg.aggregation_window_size),
-#                          self.dg.batch_feature_shape)
+class Test_DataGenerator_swapped_lstm_batch_size(Test_DataGenerator):
 
+    def __init__(self, method_name):
+        super(Test_DataGenerator_swapped_lstm_batch_size, self).__init__(method_name)
+        self.dg = DataGenerator(
+            self.df,
+            {"Close$": identity},
+            {"Close$": identity},
+            batch_size=2,
+            lstm_memory_size=4,
+            aggregation_window_size=3,
+            training_percentage=1.0
+        )
+        self.dg_test = self.dg.as_test_data_generator(0.5)
+
+    def test_switched_shape(self):
+        self.assertEqual((self.dg.batch_size, self.dg.lstm_memory_size, self.dg.aggregation_window_size),
+                         self.dg.batch_feature_shape)
+
+    def test_concatenate_vectors(self):
+        pass
+
+    def test_decode(self):
+        pass
 
 # TODO allow forecast wirndow 0, try to leaarn linear regression
 # TODO make a test set for return_sequence = True
