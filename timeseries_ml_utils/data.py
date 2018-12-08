@@ -232,12 +232,13 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         prediction = np.hstack(batches[0])
         labels = np.hstack(batches[1])
-        errors = np.hstack(batches[2])  # FIXME
+        errors = np.hstack(batches[2])
         r_squares = np.hstack(batches[3])
 
-        stds = None  # FIXME np.apply_over_axes(np.std, errors, [1])  # expect errors.shape[0] == labels.shape[1]
+        standard_deviations = np.array([errors[i, :, -1, j].std()
+                                        for i in range(errors.shape[0]) for j in range(errors.shape[-1])])
 
-        return BackTestHistory(self._get_column_names(self.labels), prediction, labels, r_squares, stds)
+        return BackTestHistory(self._get_column_names(self.labels), prediction, labels, r_squares, standard_deviations)
 
     def _back_test_batch(self, i, batch_predictor, decoders=None):
         # make a prediction
@@ -250,8 +251,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
                                           identity_encoders)
 
         # calculate errors between prediction and label per value
-        # // prediction[0, :, :, 0]
-        errors = prediction - labels  # FIXME do something like errors[,:].std()
+        errors = (prediction - labels) ** 2
 
         # calculate an r2 for each batch and each lstm output sequence
         r_squares = np.reshape([r2_score(labels[i], prediction[i]) for i in np.ndindex(prediction.shape[:-1])],
