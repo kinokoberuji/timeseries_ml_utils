@@ -155,11 +155,11 @@ class Test_DataGenerator(TestCase):
 
         # shape (batch_size, features, lstm_hist, aggregation)
         features, feature_index = self.dg._get_features_batch(last_index)
-        decoded_batch, index, ref_index = self.dg._decode_batch(last_index, lambda x: x[:, -1], self.dg.labels)
+        decoded_batch, index, _, ref_index = self.dg._decode_batch(last_index, lambda x: x[:, -1], self.dg.labels)
         np.testing.assert_array_equal(features[-1, -1], decoded_batch[-1, -1, -1])
 
     def test_back_test_batch(self):
-        prediction, labels, errors, r_squares = self.dg._back_test_batch(0, self.last_lstm_features_lambda, self.dg.labels)
+        prediction, labels, errors, r_squares, reference_values = self.dg._back_test_batch(0, self.last_lstm_features_lambda, self.dg.labels)
         expected = labels[-1, -1, -1] - self.dg.forecast_horizon
         self.assertEqual(prediction.shape, labels.shape)
         np.testing.assert_array_equal(expected, prediction[-1, -1, -1])

@@ -1,12 +1,15 @@
 from scipy.fftpack import dct
 from random import randint
 from fastdtw import fastdtw
+from bitstring import BitArray
 import matplotlib.pyplot as plt
 import scipy.stats as st
 import pandas as pd
 import numpy as np
 import math
 import re
+
+from sklearn.metrics import confusion_matrix
 
 
 def dct_distance(x, y):
@@ -91,9 +94,11 @@ def add_sinusoidal_time(df):
 
 class BackTestHistory(object):
 
-    def __init__(self, column_names, predictions, labels, r_squares, standard_deviations, confidence=.80):
+    def __init__(self, column_names, predictions, reference_values, labels, r_squares, standard_deviations,
+                 confidence=.80):
         self.column_names = column_names
         self.predictions = predictions
+        self.reference_values = reference_values
         self.labels = labels
         self.r_squares = r_squares
         self.standard_deviations = standard_deviations
@@ -108,7 +113,31 @@ class BackTestHistory(object):
 
     def get_measures(self):
         return self.predictions, self.labels, self.r_squares, self.standard_deviations
-    
+
+    def confusion_matrix(self):
+        nr_of_values = self.labels.shape[1]
+        result = {}
+
+        for i, label in enumerate(self.column_names):
+            l = self.labels[i]
+            p = self.predictions[i]
+            r = self.reference_values[i]
+
+            # one way would be to use a bit coding
+            y = [sum([f > 0 for f in l[j, -1] / r[j] - 1]) for j in range(nr_of_values)]
+            y_hat = [sum([f > 0 for f in p[j, -1] / r[j] - 1]) for j in range(nr_of_values)]
+
+            # another way would be bucketing
+
+            # finally calculate the confusion matrix
+            result[label] = confusion_matrix(y, y_hat)
+
+        return result
+
+    def back_test_confidence(self):
+        # TODO back test how often a label exceeded the confidence
+        pass
+
     def hist(self, figsize=None):
         fig = plt.figure(figsize=figsize)
 

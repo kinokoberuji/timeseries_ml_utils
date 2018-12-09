@@ -38,5 +38,5 @@ class Test_DataGenerator(TestCase):
                                    model_filename="/tmp/{}.h5".format(str(uuid.uuid4())))
 
         backtest_result = model_data.back_test(lambda x: x[:, -1])
+        print(backtest_result.confusion_matrix())
         backtest_result.plot_random_sample()
-

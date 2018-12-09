@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from shutil import rmtree
 from unittest import TestCase
-from ..tensorboard import TensorboardLogger
+from timeseries_ml_utils.tensorboard import TensorboardLogger
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools as it

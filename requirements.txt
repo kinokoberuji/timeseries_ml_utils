@@ -1,3 +1,4 @@
+bitstring
 scikit-learn
 tensorflow
 asciichartpy

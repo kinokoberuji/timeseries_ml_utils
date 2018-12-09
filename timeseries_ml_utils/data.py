@@ -234,21 +234,23 @@ class AbstractDataGenerator(keras.utils.Sequence):
         labels = np.hstack(batches[1])
         errors = np.hstack(batches[2])
         r_squares = np.hstack(batches[3])
+        reference_values = np.hstack(batches[4])
 
         standard_deviations = np.array([errors[i, :, -1, j].std()
                                         for i in range(errors.shape[0]) for j in range(errors.shape[-1])])
 
-        return BackTestHistory(self._get_column_names(self.labels), prediction, labels, r_squares, standard_deviations)
+        return BackTestHistory(self._get_column_names(self.labels), prediction, reference_values, labels, r_squares,
+                               standard_deviations)
 
     def _back_test_batch(self, i, batch_predictor, decoders=None):
         # make a prediction
-        prediction, _, _ = self._decode_batch(i, batch_predictor, decoders or self.labels)
+        prediction, _, _, _ = self._decode_batch(i, batch_predictor, decoders or self.labels)
 
         # get the labels.
         # Note that we do not want to encode the labels this time so we pass identity encoder and decoder
         identity_encoders = [(col, identity) for _, (col, _) in enumerate(self.labels)]
-        labels, _, _ = self._decode_batch(i, lambda _: self._get_labels_batch(i, identity_encoders)[0],
-                                          identity_encoders)
+        labels, _, ref_values, _ = self._decode_batch(i, lambda _: self._get_labels_batch(i, identity_encoders)[0],
+                                                      identity_encoders)
 
         # calculate errors between prediction and label per value
         errors = (prediction - labels) ** 2
@@ -257,7 +259,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
         r_squares = np.reshape([r2_score(labels[i], prediction[i]) for i in np.ndindex(prediction.shape[:-1])],
                                prediction.shape[:-1])
 
-        return prediction, labels, errors, r_squares
+        # reshape the reference values
+        ref_values = ref_values.reshape(r_squares.shape)
+        return prediction, labels, errors, r_squares, ref_values
 
     def _decode_batch(self, i, predictor_function, decoding_functions):
         # get values
@@ -271,7 +275,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         decoded_batch = np.stack([self._decode(sample, batch_ref_values[i], decoding_functions)
                                   for i, sample in enumerate(prediction)], axis=1)
 
-        return decoded_batch, index, batch_ref_index
+        return decoded_batch, index, batch_ref_values, batch_ref_index
 
     def _get_decode_ref_values(self, i, columns, is_lstm_return_sequence=False):
         ref_loc = self._get_end_of_features_loc(i)
