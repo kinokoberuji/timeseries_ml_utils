@@ -109,18 +109,19 @@ class BackTestHistory(object):
     def get_measures(self):
         return self.predictions, self.labels, self.r_squares, self.standard_deviations
     
-    def hist(self):
-        fig = plt.figure()
+    def hist(self, figsize=None):
+        fig = plt.figure(figsize=figsize)
 
         for i, label in enumerate(self.column_names):
-            plt.hist(self.r_squares[i, :, -1], label='r²')
-            plt.legend(loc='best')
+            plt.hist(self.r_squares[i, :, -1], label=label)
 
+        plt.legend(loc='best')
+        plt.title('r²')
         return fig
 
-    def plot_random_sample(self, loc=None):
+    def plot_random_sample(self, figsize=None, loc=None):
         j = loc if loc is not None else randint(0, self.predictions.shape[1] - 1)
-        fig = plt.figure()
+        fig = plt.figure(figsize=figsize)
 
         for i, label in enumerate(self.column_names):
             y = self.labels[i, j, -1]
