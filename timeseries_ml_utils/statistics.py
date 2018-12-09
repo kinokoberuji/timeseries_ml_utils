@@ -110,10 +110,16 @@ class BackTestHistory(object):
         return self.predictions, self.labels, self.r_squares, self.standard_deviations
     
     def hist(self):
-        pass
+        fig = plt.figure()
 
-    def plot_random_sample(self):
-        j = randint(0, self.predictions.shape[1])
+        for i, label in enumerate(self.column_names):
+            plt.hist(self.r_squares[i, :, -1], label='r²')
+            plt.legend(loc='best')
+
+        return fig
+
+    def plot_random_sample(self, loc=None):
+        j = loc if loc is not None else randint(0, self.predictions.shape[1] - 1)
         fig = plt.figure()
 
         for i, label in enumerate(self.column_names):
@@ -128,6 +134,6 @@ class BackTestHistory(object):
             plt.plot(y_hat, label='predict')
             plt.plot(y, label='label')
             plt.legend(loc='best')
-            plt.title("{}: {}, r2={:.2f}".format(j, label, 0.))
+            plt.title("{}: {}, r²={:.2f}".format(j, label, self.r_squares[i, j, -1]))
 
         return fig
