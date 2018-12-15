@@ -1,3 +1,5 @@
+from typing import Union, Iterable
+
 from pandas_ml import ConfusionMatrix
 from scipy.fftpack import dct
 from random import randint
@@ -132,11 +134,14 @@ class BackTestHistory(object):
 
         return result
 
+    def hist(self, bins: Union[int, Iterable, str] = 10):
+        return {label: np.histogram(self.r_squares[i, :, -1], bins) for i, label in enumerate(self.column_names)}
+
     def back_test_confidence(self):
         # TODO back test how often a label exceeded the confidence
         pass
 
-    def hist(self, figsize=None):
+    def plot_hist(self, figsize=None):
         fig = plt.figure(figsize=figsize)
 
         for i, label in enumerate(self.column_names):
@@ -165,3 +170,11 @@ class BackTestHistory(object):
             plt.title("{}: {}, r²={:.2f}".format(j, label, self.r_squares[i, j, -1]))
 
         return fig
+
+    def summary(self):
+        # TODO return some summary like
+        #  confusion matrix Phi coefficient
+        #  r2 distribution
+        #  some error measure
+        #  and how often the error exceeds the expected error
+        pass

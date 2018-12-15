@@ -257,8 +257,14 @@ class AbstractDataGenerator(keras.utils.Sequence):
         errors = (prediction - labels) ** 2
 
         # calculate an r2 for each batch and each lstm output sequence
-        r_squares = np.reshape([r2_score(labels[i], prediction[i]) for i in np.ndindex(prediction.shape[:-1])],
-                               prediction.shape[:-1])
+        if errors.shape[-1] == 1:
+            # the best prediction we can do is use the reference value and we compare how much better we are
+            # for an r2 of 1 we want to be at least as close only percent of the error to the last value (ref value)
+            # r_squares = (1 - (errors / (labels - ref_values) ** 2))[:, :, -1]
+            r_squares = (1 - (errors / ((labels - ref_values) ** 2 * 0.01)))[:, :, -1]
+        else:
+            r_squares = np.reshape([r2_score(labels[i], prediction[i]) for i in np.ndindex(prediction.shape[:-1])],
+                                   prediction.shape[:-1])
 
         # reshape the reference values
         ref_values = ref_values.reshape(r_squares.shape)

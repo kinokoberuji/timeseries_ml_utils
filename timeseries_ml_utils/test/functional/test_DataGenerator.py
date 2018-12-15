@@ -54,13 +54,16 @@ class Test_DataGenerator(TestCase):
 
         # check confusion matrix
         confusion_matrix = backtest_log_return.confusion_matrix()["Close"]
+        print("Phi: {}".format(confusion_matrix.MCC))
         self.assertEqual(8, confusion_matrix.TP)
         self.assertEqual(13, confusion_matrix.TN)
         self.assertEqual(12, confusion_matrix.FP)
         self.assertEqual(15, confusion_matrix.FN)
 
-        # FIXME we expect some r2
-        self.assertTrue(True)
+        # we expect some r2 which is maximum as good as just using the last value (reference value)
+        r2 = backtest_log_return.hist()["Close"]
+        print("best r2: {}".format(r2[1].max()))
+        self.assertTrue(r2[1].max() <= .8)
 
     def test_slope_estimation(self):
         data = self.df.iloc[-60:].copy()
@@ -88,10 +91,12 @@ class Test_DataGenerator(TestCase):
         backtest = model_data.back_test(batch_predictor)
 
         confusion_matrix = backtest.confusion_matrix()["Close"]
+        print("Phi: {}".format(confusion_matrix.MCC))
         self.assertEqual((13, 13), confusion_matrix.toarray().shape)
 
-        # FIXME assert some r2
-        self.assertTrue(True)
+        hist = backtest.hist()["Close"]
+        print("expected r2: {}".format(hist[1][np.argmax(hist[0])]))
+        self.assertTrue(hist[1].max() <= .2)
 
     def test_scratch(self):
         data = self.df.iloc[-60:].copy()
