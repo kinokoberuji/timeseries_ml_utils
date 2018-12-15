@@ -4,6 +4,7 @@ import math
 import os
 import os.path
 import re
+import uuid
 from typing import List, Dict, Callable, Tuple
 from sklearn.metrics import r2_score
 import keras
@@ -409,11 +410,11 @@ class DataGenerator(AbstractDataGenerator):
                  dataframe,  # FIXME provide a DataFetcher and use a classmethod on the DataFetcher instead
                  features: Dict[str, Callable[[np.ndarray, float, bool], np.ndarray]],
                  labels: Dict[str, Callable[[np.ndarray, float, bool], np.ndarray]],
-                 batch_size: int=100, lstm_memory_size: int=52 * 5, aggregation_window_size: int=32, forecast_horizon: int=None,
-                 training_percentage: float=0.8,
-                 return_sequences: bool=False,
-                 variances: Dict[str, float]={".*": 0.94},
-                 model_filename: str="./model.h5"):
+                 batch_size: int = 100, lstm_memory_size: int = 52 * 5, aggregation_window_size: int = 32, forecast_horizon: int = None,
+                 training_percentage: float = 0.8,
+                 return_sequences: bool = False,
+                 variances: Dict[str, float] = {".*": 0.94},
+                 model_filename: str = "./{}-model.h5".format(str(uuid.uuid4()))):
         super(DataGenerator, self).__init__(add_sinusoidal_time(add_ewma_variance(dataframe, variances)),
                                             [(col, r) for col in dataframe.columns for f, r in features.items() if re.search(f, col)],
                                             [(col, r) for col in dataframe.columns for l, r in labels.items() if re.search(l, col)],

@@ -1,15 +1,13 @@
+from pandas_ml import ConfusionMatrix
 from scipy.fftpack import dct
 from random import randint
 from fastdtw import fastdtw
-from bitstring import BitArray
 import matplotlib.pyplot as plt
 import scipy.stats as st
 import pandas as pd
 import numpy as np
 import math
 import re
-
-from sklearn.metrics import confusion_matrix
 
 
 def dct_distance(x, y):
@@ -123,14 +121,14 @@ class BackTestHistory(object):
             p = self.predictions[i]
             r = self.reference_values[i]
 
-            # one way would be to use a bit coding
+            # one way would be to count positive returns
             y = [sum([f > 0 for f in l[j, -1] / r[j] - 1]) for j in range(nr_of_values)]
             y_hat = [sum([f > 0 for f in p[j, -1] / r[j] - 1]) for j in range(nr_of_values)]
 
             # another way would be bucketing
 
             # finally calculate the confusion matrix
-            result[label] = confusion_matrix(y, y_hat)
+            result[label] = ConfusionMatrix(y, y_hat)
 
         return result
 

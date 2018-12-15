@@ -1,3 +1,4 @@
+pandas_ml
 bitstring
 scikit-learn
 tensorflow
