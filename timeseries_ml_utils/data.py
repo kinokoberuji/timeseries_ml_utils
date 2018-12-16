@@ -108,7 +108,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         if self.aggregation_window_size < 1:
             raise ValueError('Aggregation window needs to be >= 1')
         if self.length < batch_size:
-            raise ValueError('Not enough Data for given memory and window sizes: ' + str(self.length))
+            raise ValueError('Not enough Data for given batch size of memory and window sizes: ' + str(self.length))
 
         # derived properties
         # we only know the shape (self.batch_size, self.lstm_memory_size, ??) but the number of features depend on the

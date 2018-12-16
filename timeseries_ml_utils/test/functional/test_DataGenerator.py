@@ -6,6 +6,7 @@ from numpy.random.mtrand import RandomState
 import timeseries_ml_utils.test
 from timeseries_ml_utils.data import *
 from timeseries_ml_utils.encoders import *
+from timeseries_ml_utils.utils import batch_predictor_from
 
 
 class Test_DataGenerator(TestCase):
@@ -92,11 +93,54 @@ class Test_DataGenerator(TestCase):
 
         confusion_matrix = backtest.confusion_matrix()["Close"]
         print("Phi: {}".format(confusion_matrix.MCC))
+        # we would expect 16x16 but 3 cases never happened
         self.assertEqual((13, 13), confusion_matrix.toarray().shape)
 
         hist = backtest.hist()["Close"]
         print("expected r2: {}".format(hist[1][np.argmax(hist[0])]))
         self.assertTrue(hist[1].max() <= .2)
+
+    # this is rather an experiment as a test but this should run without any exception
+    def test_slope_slope_estimation(self):
+        data = self.df.iloc[-80:].copy()
+
+        def slope_encoder(y, ref, encode):
+            if encode:
+                x = np.arange(0, len(y))
+                slope, intercept, r_value, p_value, std_err = linregress(x, y)
+                vec = np.zeros(len(y))
+                vec[0] = slope
+                return vec
+            else:
+                slope = y[0]
+                return np.array([ref + slope * i for i in range(len(y))])
+
+        # get the slope of the slopes, predict the next slope
+        def predictor(sample):
+            x = np.arange(0, len(sample))
+            y = sample[:, 0]
+            slope, intercept, r_value, p_value, std_err = linregress(x, y)
+            slope_hat = intercept + len(sample) * intercept
+            return np.repeat(slope_hat, sample.shape[1])
+
+        # as we need to predict in batches
+        batch_predictor = batch_predictor_from(predictor)
+
+        model_data = DataGenerator(data,
+                                   {"Close$": slope_encoder},
+                                   {"Close$": slope_encoder},
+                                   lstm_memory_size=32, aggregation_window_size=16, batch_size=2,
+                                   model_filename="/tmp/slope_2.h5")
+
+        backtest = model_data.back_test(batch_predictor)
+
+        confusion_matrix = backtest.confusion_matrix()["Close"]
+        print("Phi: {}".format(confusion_matrix.MCC))
+        # we would expect 16x16 but 6 cases never happened
+        self.assertEqual((10, 10), confusion_matrix.toarray().shape)
+
+        hist = backtest.hist()["Close"]
+        print("expected r2: {}".format(hist[1][np.argmax(hist[0])]))
 
     def test_scratch(self):
         data = self.df.iloc[-60:].copy()
