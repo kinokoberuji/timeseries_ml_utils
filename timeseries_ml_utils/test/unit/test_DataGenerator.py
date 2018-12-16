@@ -300,6 +300,35 @@ class Test_DataGenerator_multiple_features(Test_DataGenerator):
         # FIXME self.assertEqual(len(self.dg), prediction.shape[1])
 
 
+@unittest.skip("not implemented yet")
+class Test_DataGenerator_multiple_features_diffene_shape(Test_DataGenerator):
+
+    def __init__(self, method_name):
+        super(Test_DataGenerator_multiple_features_diffene_shape, self).__init__(method_name)
+        try:
+            self.dg = DataGenerator(
+                self.df,
+                {"Close$": identity, "Volume": lambda x, ref_value, is_encode: np.array([1.2])},
+                {"Close$": identity},
+                batch_size=2,
+                lstm_memory_size=3,
+                aggregation_window_size=4,
+                training_percentage=1.0
+            )
+            self.dg_test = self.dg.as_test_data_generator(0.5)
+
+        except Exception as e:
+            print("Ingore this error as its not yet implemented")
+            print(e)
+
+    def test_concatenate_vectors(self):
+        pass
+
+    def test_decode(self):
+        pass
+
+
+
 # TODO allow forecast wirndow 0, try to leaarn linear regression
 # TODO make a test set for return_sequence = True
 # TODO test multiple features
