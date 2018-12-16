@@ -5,16 +5,15 @@ import os
 import os.path
 import re
 import uuid
-from typing import List, Dict, Callable, Tuple
-from sklearn.metrics import r2_score
 import keras
 import numpy as np
 import pandas as pd
+from typing import List, Dict, Callable, Tuple
+from sklearn.metrics import r2_score
 from keras.models import load_model
 from pandas_datareader import DataReader
-
 from timeseries_ml_utils.encoders import identity
-from .callbacks import RelativeAccuracy
+from .callbacks import RelativeAccuracy, BatchHistory
 from .statistics import add_ewma_variance, add_sinusoidal_time, relative_dtw, r_square, BackTestHistory
 
 
@@ -443,29 +442,36 @@ class DataGenerator(AbstractDataGenerator):
     def as_test_data_generator(self, training_percentage: float = None) -> TestDataGenerator:
         return TestDataGenerator(self, training_percentage)
 
+    def get_max_batch_size(self):
+        return math.gcd(len(self), len(self.as_test_data_generator()))
+
     def fit(self,
             model: keras.Model,
             fit_generator_args: Dict,
             relative_accuracy_function: Callable[[np.ndarray, np.ndarray], float] = None,
             frequency: int = 50,
-            log_dir: str = ".logs/"):
+            log_dir: str = None):
 
         test_data = self.as_test_data_generator()
-        # FIXME callback = RelativeAccuracy(test_data, relative_accuracy_function, frequency, log_dir)
+
+        callbacks = [
+            BatchHistory()
+            # FIXME callback = RelativeAccuracy(test_data, relative_accuracy_function, frequency, log_dir)
+        ]
 
         fit_generator_args["generator"] = self
         fit_generator_args["validation_data"] = test_data
-        # FIXME fit_generator_args["callbacks"] = [callback] + fit_generator_args.get("callbacks", [])
-        fit_generator_args["callbacks"] = fit_generator_args.get("callbacks", [])
+        fit_generator_args["callbacks"] = callbacks + fit_generator_args.get("callbacks", [])
 
         hist = model.fit_generator(**fit_generator_args)
 
         model.save(self.model_filename)
 
-        # TODO return PredictiveDataGenerator, shoudl contain test_data, history and backtest
+        # TODO return PredictiveDataGenerator, shoudl contain test_data, history and backtest,
+        #  make nice object instead of Dict
         return {
-            "hist_raw": hist,
-            "hist": pd.DataFrame(hist.history),
+            "epoch_hist": pd.DataFrame(hist.history),
+            "batch_hist": pd.DataFrame(callbacks[0].history),
             "back_test": test_data.back_test(model.predict),
             "test_data": test_data
         }

@@ -5,11 +5,23 @@ from shutil import rmtree
 
 import numpy as np
 from keras import backend as K
-from keras.callbacks import Callback
+from keras.callbacks import Callback, History
 from matplotlib import pyplot as plt
 
 from .statistics import ascii_hist, relative_dtw
 from .tensorboard import TensorboardLogger
+
+
+class BatchHistory(Callback):
+    def on_train_begin(self, logs=None):
+        self.batch = []
+        self.history = {}
+
+    def on_batch_end(self, batch, logs=None):
+        logs = logs or {}
+        self.batch.append(batch)
+        for k, v in logs.items():
+            self.history.setdefault(k, []).append(v)
 
 
 class RelativeAccuracy(Callback):

@@ -1,5 +1,7 @@
 ## TODO now
 
+add a new fit callback just retuning metrics after each batch
+ 
 create the matrix per column instead of all concatenated columns and then allow an additional
 encoding step on the whole (lstm, features)-matrix per column before we concatenate all
 features into the final matrix. this way we could also encode the frequencies of the 

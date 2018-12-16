@@ -180,7 +180,7 @@ class Test_DataGenerator(TestCase):
                       "shuffle": False,
                       "verbose": 1}
 
-        fit = model_data.fit(model, train_args, frequency=10, relative_accuracy_function=r_square, log_dir="/tmp/foo.123/")
+        fit = model_data.fit(model, train_args, frequency=10, relative_accuracy_function=r_square)
         self.assertTrue(True)
 
     def test_scratch(self):
