@@ -1,6 +1,8 @@
 import uuid
 from unittest import TestCase
 import numpy as np
+from keras import Sequential
+from keras.layers import LSTM
 from numpy.random.mtrand import RandomState
 
 import timeseries_ml_utils.test
@@ -141,6 +143,45 @@ class Test_DataGenerator(TestCase):
 
         hist = backtest.hist()["Close"]
         print("expected r2: {}".format(hist[1][np.argmax(hist[0])]))
+
+    def test_keras_model(self):
+        # encoders and decoders
+        linreg = RegressionLine(16)
+
+        # fetch data
+        data = DataFetcher(["GLD.US"], limit=350)
+        print(data.fetch_data().tail())
+        print(len(data.get_dataframe()))
+
+        model_data = DataGenerator(data.get_dataframe(),
+                                   {"^trigonometric": identity,
+                                    "(Open|High|Low|Close)$": linreg.encode_decode},
+                                   {"GLD.US.Close$": linreg.encode_decode},
+                                   aggregation_window_size=16, batch_size=10)
+
+        print(model_data.batch_feature_shape)
+        print(model_data.batch_label_shape)
+
+        model = Sequential(name="LSTM-Model-1")
+        model.add(LSTM(model_data.batch_label_shape[-1],
+                       name="LSTM-Layer-1",
+                       batch_input_shape=model_data.batch_feature_shape,
+                       activation='tanh',
+                       dropout=0,
+                       recurrent_dropout=0,
+                       stateful=True,
+                       return_sequences=model_data.return_sequences))
+
+        model.compile("Adam", loss="mse", metrics=['mae', 'acc'])
+
+        train_args = {"epochs": 1,
+                      "use_multiprocessing": True,
+                      "workers": 4,
+                      "shuffle": False,
+                      "verbose": 1}
+
+        fit = model_data.fit(model, train_args, frequency=10, relative_accuracy_function=r_square, log_dir="/tmp/foo.123/")
+        self.assertTrue(True)
 
     def test_scratch(self):
         data = self.df.iloc[-60:].copy()

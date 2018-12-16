@@ -117,6 +117,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.batch_feature_shape = item_zero[0].shape
         self.batch_label_shape = item_zero[1].shape
 
+    def get_df_columns(self):
+        return self.dataframe.columns.values.tolist()
+
     def get_last_index(self):
         return len(self) - 1
 
@@ -179,7 +182,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
         matrix = [matrix[i:i + self.lstm_memory_size] for i in range(self.batch_size)] if is_lstm_aggregate \
             else [matrix[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
 
+        # get data frames indices of matrix
         index = [index[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
+
         return np.array(matrix), index
 
     def _aggregate_window(self, loc, columns):
@@ -333,7 +338,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
 class TestDataGenerator(AbstractDataGenerator):
 
-    def __init__(self, data_generator, training_percentage: float=None):
+    def __init__(self, data_generator, training_percentage: float = None):
         super(TestDataGenerator, self).__init__(data_generator.dataframe,
                                                 data_generator.features,
                                                 data_generator.labels,
@@ -435,27 +440,35 @@ class DataGenerator(AbstractDataGenerator):
         super(DataGenerator, self).on_epoch_end()
         self.model_filename = model_filename
 
-    def as_test_data_generator(self, training_percentage: float=None) -> TestDataGenerator:
+    def as_test_data_generator(self, training_percentage: float = None) -> TestDataGenerator:
         return TestDataGenerator(self, training_percentage)
 
     def fit(self,
             model: keras.Model,
             fit_generator_args: Dict,
-            relative_accuracy_function: Callable[[np.ndarray, np.ndarray], float]=relative_dtw,
-            frequency: int=50,
-            log_dir: str=".logs/"):
+            relative_accuracy_function: Callable[[np.ndarray, np.ndarray], float] = None,
+            frequency: int = 50,
+            log_dir: str = ".logs/"):
 
         test_data = self.as_test_data_generator()
-        callback = RelativeAccuracy(test_data, relative_accuracy_function, frequency, log_dir)
+        # FIXME callback = RelativeAccuracy(test_data, relative_accuracy_function, frequency, log_dir)
 
         fit_generator_args["generator"] = self
         fit_generator_args["validation_data"] = test_data
-        fit_generator_args["callbacks"] = [callback] + fit_generator_args.get("callbacks", [])
+        # FIXME fit_generator_args["callbacks"] = [callback] + fit_generator_args.get("callbacks", [])
+        fit_generator_args["callbacks"] = fit_generator_args.get("callbacks", [])
 
         hist = model.fit_generator(**fit_generator_args)
 
         model.save(self.model_filename)
-        return hist  # TODO return PredictiveDataGenerator
+
+        # TODO return PredictiveDataGenerator, shoudl contain test_data, history and backtest
+        return {
+            "hist_raw": hist,
+            "hist": pd.DataFrame(hist.history),
+            "back_test": test_data.back_test(model.predict),
+            "test_data": test_data
+        }
 
     def as_predictive_data_generator(self) -> PredictiveDataGenerator:
         model = load_model(self.model_filename)

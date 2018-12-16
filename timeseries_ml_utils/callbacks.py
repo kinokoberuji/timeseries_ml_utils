@@ -17,7 +17,7 @@ class RelativeAccuracy(Callback):
 
     def __init__(self,
                  data_generator,
-                 relative_accuracy_function=relative_dtw,
+                 relative_accuracy_function=None,
                  frequency=50,
                  log_dir="/tmp/tb.log"):
         self.data_generator = data_generator
@@ -101,7 +101,9 @@ class RelativeAccuracy(Callback):
                 features.append(features_batch[j])
                 labels.append(labels_batch[j])
                 predictions.append(predictions_batch[j])
-                r2.append(self.relative_accuracy_function(labels_batch[j], predictions_batch[j]))
+
+                if self.relative_accuracy_function:
+                    r2.append(self.relative_accuracy_function(labels_batch[j], predictions_batch[j]))
 
         predictions = np.array(predictions)
         features = np.array(features)
