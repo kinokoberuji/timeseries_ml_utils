@@ -353,10 +353,15 @@ class TestDataGenerator(AbstractDataGenerator):
         pass
 
 
+# TODO This class should be re-written as we need to
+#  find a way to persist fitted models inclusive data generating cats like lstm, window and batch sizes
+#  find a way to provide a predict function
+#  find a way to provide fit quality statistics and backtest results
 class PredictiveDataGenerator(AbstractDataGenerator):
 
     # we need to extend DataGenerator because of windowing, encoding and decoding ...
     def __init__(self, model: keras.Model, data_generator):
+        # FIXME load all parameters but the dataframe form a file
         super(PredictiveDataGenerator, self).__init__(data_generator.dataframe,
                                                       data_generator.features,
                                                       data_generator.labels,
@@ -465,11 +470,14 @@ class DataGenerator(AbstractDataGenerator):
 
         hist = model.fit_generator(**fit_generator_args)
 
+        # save results
         model.save(self.model_filename)
 
-        # TODO return PredictiveDataGenerator, shoudl contain test_data, history and backtest,
+        # TODO save all the back test results as well
+        # TODO return PredictiveDataGenerator, should contain test_data, history and backtest,
         #  make nice object instead of Dict
         return {
+            "file_name": self.model_filename,
             "epoch_hist": pd.DataFrame(hist.history),
             "batch_hist": pd.DataFrame(callbacks[0].history),
             "back_test": test_data.back_test(model.predict),

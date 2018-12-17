@@ -149,6 +149,8 @@ class BackTestHistory(object):
 
         plt.legend(loc='best')
         plt.title('r²')
+        plt.close()
+
         return fig
 
     def plot_random_sample(self, figsize=None, loc=None):
@@ -168,6 +170,7 @@ class BackTestHistory(object):
             plt.plot(y, label='label')
             plt.legend(loc='best')
             plt.title("{}: {}, r²={:.2f}".format(j, label, self.r_squares[i, j, -1]))
+            plt.close()
 
         return fig
 
@@ -178,4 +181,3 @@ class BackTestHistory(object):
         #  some error measure
         #  and how often the error exceeds the expected error
         pass
-

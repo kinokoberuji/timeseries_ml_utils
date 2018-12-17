@@ -69,6 +69,7 @@ class RegressionLine:
 def identity(x, ref_value, is_encode):
     return x
 
+
 # Deprecated
 def normalize(x, ref_value, is_encode):
     if is_encode:
