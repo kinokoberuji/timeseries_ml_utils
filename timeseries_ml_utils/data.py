@@ -1,13 +1,16 @@
 import datetime
 import logging
 import math
+import io
 import os
 import os.path
 import re
+import tempfile
 import uuid
 import keras
 import numpy as np
 import pandas as pd
+import cloudpickle
 from typing import List, Dict, Callable, Tuple
 from sklearn.metrics import r2_score
 from keras.models import load_model
@@ -47,7 +50,7 @@ class DataFetcher:
         df.to_hdf(self.file_name, key=self.df_key, mode='w')
         return df
 
-    def get_dataframe(self):
+    def get_dataframe(self) -> pd.DataFrame:
         if not os.path.isfile(self.file_name):
             logging.info("fetching data for " + self.file_name)
             self.fetch_data()
@@ -360,25 +363,36 @@ class TestDataGenerator(AbstractDataGenerator):
 class PredictiveDataGenerator(AbstractDataGenerator):
 
     # we need to extend DataGenerator because of windowing, encoding and decoding ...
-    def __init__(self, model: keras.Model, data_generator):
-        # FIXME load all parameters but the dataframe form a file
-        super(PredictiveDataGenerator, self).__init__(data_generator.dataframe,
-                                                      data_generator.features,
-                                                      data_generator.labels,
-                                                      data_generator.batch_size,
-                                                      data_generator.lstm_memory_size,
-                                                      data_generator.aggregation_window_size,
-                                                      data_generator.forecast_horizon,
+    def __init__(self, model_file_name: str, data_fetcher: pd.DataFrame):  # FIXME accept DataFetcher only
+        self.model_file_name = model_file_name
+
+        # load all parameters but the dataframe form a file
+        with io.open(self.model_file_name + '.dg', 'rb') as f:
+            epoch_hist, batch_hist, back_test, features, labels, \
+            batch_size, lstm_memory_size, aggregation_window_size, forecast_horizon, \
+            return_sequences = cloudpickle.load(f)
+
+        super(PredictiveDataGenerator, self).__init__(data_fetcher,  # getDataFrame
+                                                      features,
+                                                      labels,
+                                                      batch_size,
+                                                      lstm_memory_size,
+                                                      aggregation_window_size,
+                                                      forecast_horizon,
                                                       1.0,
-                                                      data_generator.return_sequences,
+                                                      return_sequences,
                                                       False)
 
-        self.model = model
+        self.model = load_model(self.model_file_name + '.h5')
+        self.epoch_hist = epoch_hist
+        self.batch_hist = batch_hist
+        self.back_test_history: BackTestHistory = back_test
 
     def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray] = None):
         return super(PredictiveDataGenerator, self).back_test(batch_predictor or self.model.predict)
 
     def predict(self, i: int):
+        # FIXME potentially needs to be re-done
         timedelta = self._get_time_delta()
         df = self.dataframe
         df_dates = df.index
@@ -429,7 +443,7 @@ class DataGenerator(AbstractDataGenerator):
                  training_percentage: float = 0.8,
                  return_sequences: bool = False,
                  variances: Dict[str, float] = {".*": 0.94},
-                 model_filename: str = "./{}-model.h5".format(str(uuid.uuid4()))):
+                 model_filename: str = "{}/{}-model".format(tempfile.gettempdir(), str(uuid.uuid4()))):
         super(DataGenerator, self).__init__(add_sinusoidal_time(add_ewma_variance(dataframe, variances)),
                                             [(col, r) for col in dataframe.columns for f, r in features.items() if re.search(f, col)],
                                             [(col, r) for col in dataframe.columns for l, r in labels.items() if re.search(l, col)],
@@ -455,7 +469,7 @@ class DataGenerator(AbstractDataGenerator):
             fit_generator_args: Dict,
             relative_accuracy_function: Callable[[np.ndarray, np.ndarray], float] = None,
             frequency: int = 50,
-            log_dir: str = None):
+            log_dir: str = None) -> PredictiveDataGenerator:
 
         test_data = self.as_test_data_generator()
 
@@ -468,25 +482,35 @@ class DataGenerator(AbstractDataGenerator):
         fit_generator_args["validation_data"] = test_data
         fit_generator_args["callbacks"] = callbacks + fit_generator_args.get("callbacks", [])
 
+        # train the neural network using keras
         hist = model.fit_generator(**fit_generator_args)
 
-        # save results
-        model.save(self.model_filename)
+        # convert history callbacks into data frames
+        epoch_hist = pd.DataFrame(hist.history)
+        batch_hist = pd.DataFrame(callbacks[0].history)
 
-        # TODO save all the back test results as well
-        # TODO return PredictiveDataGenerator, should contain test_data, history and backtest,
-        #  make nice object instead of Dict
-        return {
-            "file_name": self.model_filename,
-            "epoch_hist": pd.DataFrame(hist.history),
-            "batch_hist": pd.DataFrame(callbacks[0].history),
-            "back_test": test_data.back_test(model.predict),
-            "test_data": test_data
-        }
+        # save keras model and weights
+        logging.info(f'save keras model {self.model_filename }.h5')
+        model.save(self.model_filename + '.h5')
 
-    def as_predictive_data_generator(self) -> PredictiveDataGenerator:
-        model = load_model(self.model_filename)
-        return PredictiveDataGenerator(model, self)
+        # backtest model to get some statistics
+        back_test = test_data.back_test(model.predict)
 
+        # save all data needed to do predictions and to reproduce the back test
+        logging.info(f'save data model {self.model_filename }.dg')
+        with io.open(self.model_filename + '.dg', 'wb') as f:
+            cloudpickle.dump([
+                epoch_hist,
+                batch_hist,
+                back_test,
+                self.features,
+                self.labels,
+                self.batch_size,
+                self.lstm_memory_size,
+                self.aggregation_window_size,
+                self.forecast_horizon,
+                self.return_sequences
+            ], f)
 
-
+        # return a re-usable predictive data generator
+        return PredictiveDataGenerator(self.model_filename, test_data.dataframe)

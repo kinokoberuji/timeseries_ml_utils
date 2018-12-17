@@ -53,6 +53,3 @@ if __name__ == "__main__":
                   "shuffle": False}
 
     model_data.fit(model, train_args, frequency=10, relative_accuracy_function=relative_dtw_2, log_dir="/tmp/foo.123/")
-
-    predict = model_data.as_predictive_data_generator()
-    predict.predict(-8).plot

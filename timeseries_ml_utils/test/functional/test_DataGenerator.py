@@ -149,19 +149,16 @@ class Test_DataGenerator(TestCase):
         linreg = RegressionLine(16)
 
         # fetch data
-        data = DataFetcher(["GLD.US"], limit=350)
-        print(data.fetch_data().tail())
-        print(len(data.get_dataframe()))
+        data = self.df.iloc[-315:].copy()
 
-        model_data = DataGenerator(data.get_dataframe(),
+        # make some data model
+        model_data = DataGenerator(data,
                                    {"^trigonometric": identity,
                                     "(Open|High|Low|Close)$": linreg.encode_decode},
-                                   {"GLD.US.Close$": linreg.encode_decode},
+                                   {"Close$": linreg.encode_decode},
                                    aggregation_window_size=16, batch_size=10)
 
-        print(model_data.batch_feature_shape)
-        print(model_data.batch_label_shape)
-
+        # make a single layered keras model
         model = Sequential(name="LSTM-Model-1")
         model.add(LSTM(model_data.batch_label_shape[-1],
                        name="LSTM-Layer-1",
@@ -181,7 +178,18 @@ class Test_DataGenerator(TestCase):
                       "verbose": 1}
 
         fit = model_data.fit(model, train_args, frequency=10, relative_accuracy_function=r_square)
-        self.assertTrue(True)
+
+        self.assertEqual(52 * 5, fit.lstm_memory_size)
+        self.assertEqual(16, fit.forecast_horizon)
+        self.assertEqual(16, fit.aggregation_window_size)
+        self.assertEqual(10, fit.batch_size)
+        self.assertEqual(False, fit.return_sequences)
+        self.assertEqual(13, len(fit.batch_hist))
+        self.assertEqual(1, len(fit.epoch_hist))
+        self.assertEqual(315, len(fit.dataframe))
+        self.assertEqual(14, len(fit.features))
+        self.assertEqual(1, len(fit.labels))
+        self.assertTrue("Close" in fit.back_test_history.hist())
 
     def test_scratch(self):
         data = self.df.iloc[-60:].copy()

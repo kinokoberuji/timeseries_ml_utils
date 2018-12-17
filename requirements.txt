@@ -1,3 +1,4 @@
+cloudpickle
 pandas_ml
 bitstring
 scikit-learn
