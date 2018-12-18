@@ -443,7 +443,7 @@ class DataGenerator(AbstractDataGenerator):
                  training_percentage: float = 0.8,
                  return_sequences: bool = False,
                  variances: Dict[str, float] = {".*": 0.94},
-                 model_filename: str = "{}/{}-model".format(tempfile.gettempdir(), str(uuid.uuid4()))):
+                 model_path: str = "{}/{}-{}".format(tempfile.gettempdir(), datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"), str(uuid.uuid4()))):
         super(DataGenerator, self).__init__(add_sinusoidal_time(add_ewma_variance(dataframe, variances)),
                                             [(col, r) for col in dataframe.columns for f, r in features.items() if re.search(f, col)],
                                             [(col, r) for col in dataframe.columns for l, r in labels.items() if re.search(l, col)],
@@ -456,7 +456,10 @@ class DataGenerator(AbstractDataGenerator):
                                             False)
 
         super(DataGenerator, self).on_epoch_end()
-        self.model_filename = model_filename
+
+        # make directories and file name
+        os.makedirs(model_path, exist_ok=True)
+        self.model_filename = os.path.join(model_path, "model")
 
     def as_test_data_generator(self, training_percentage: float = None) -> TestDataGenerator:
         return TestDataGenerator(self, training_percentage)
@@ -475,7 +478,7 @@ class DataGenerator(AbstractDataGenerator):
 
         callbacks = [
             BatchHistory()
-            # FIXME callback = RelativeAccuracy(test_data, relative_accuracy_function, frequency, log_dir)
+            # FIXME callback = RelativeAccuracy(test_data, relative_accuracy_function, frequency, log_dir or self.model_path + logs)
         ]
 
         fit_generator_args["generator"] = self
@@ -502,7 +505,7 @@ class DataGenerator(AbstractDataGenerator):
             cloudpickle.dump([
                 epoch_hist,
                 batch_hist,
-                back_test,
+                back_test,  #[column_names, predictions, reference_values, labels, r_squares, standard_deviations, confidence]
                 self.features,
                 self.labels,
                 self.batch_size,

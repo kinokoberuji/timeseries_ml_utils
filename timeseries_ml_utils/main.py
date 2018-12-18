@@ -29,7 +29,7 @@ if __name__ == "__main__":
                                {"^trigonometric": identity,
                                 "(Open|High|Low|Close)$": linreg.get_encoder_decoder()},
                                {"GLD.US.Close$": linreg.get_encoder_decoder()},
-                               aggregation_window_size=16, batch_size=10, model_filename="/tmp/keras-foo-1.h5")
+                               aggregation_window_size=16, batch_size=10, model_path="/tmp/keras-foo-1.h5")
 
     print(model_data.batch_feature_shape)
     print(model_data.batch_label_shape)

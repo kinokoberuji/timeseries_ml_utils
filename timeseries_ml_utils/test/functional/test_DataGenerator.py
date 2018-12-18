@@ -25,7 +25,7 @@ class Test_DataGenerator(TestCase):
                                    {"Close$": identity},
                                    {"Close$": identity},
                                    lstm_memory_size=10, aggregation_window_size=16, batch_size=2,
-                                   model_filename="/tmp/{}.h5".format(str(uuid.uuid4())))
+                                   model_path="/tmp/{}.h5".format(str(uuid.uuid4())))
 
         backtest_result = model_data.back_test(lambda x: x[:, -1])
         predictions, labels, r_squares, standard_deviations = backtest_result.get_measures()
@@ -51,7 +51,7 @@ class Test_DataGenerator(TestCase):
                                          {"Close$": log_return_encoder},
                                          {"Close$": log_return_encoder},
                                          lstm_memory_size=1, aggregation_window_size=1, batch_size=1,
-                                         model_filename="/tmp/log_normal_1.h5")
+                                         model_path="/tmp/log_normal_1.h5")
 
         backtest_log_return = model_log_return.back_test(batch_log_return_predictor)
 
@@ -89,7 +89,7 @@ class Test_DataGenerator(TestCase):
                                    {"Close$": slope_encoder},
                                    {"Close$": slope_encoder},
                                    lstm_memory_size=1, aggregation_window_size=16, batch_size=10,
-                                   model_filename="/tmp/slope_1.h5")
+                                   model_path="/tmp/slope_1.h5")
 
         backtest = model_data.back_test(batch_predictor)
 
@@ -132,7 +132,7 @@ class Test_DataGenerator(TestCase):
                                    {"Close$": slope_encoder},
                                    {"Close$": slope_encoder},
                                    lstm_memory_size=32, aggregation_window_size=16, batch_size=2,
-                                   model_filename="/tmp/slope_2.h5")
+                                   model_path="/tmp/slope_2.h5")
 
         backtest = model_data.back_test(batch_predictor)
 
@@ -198,7 +198,7 @@ class Test_DataGenerator(TestCase):
                                    {"Close$": identity},
                                    {"Close$": identity},
                                    lstm_memory_size=10, aggregation_window_size=16, batch_size=2,
-                                   model_filename="/tmp/{}.h5".format(str(uuid.uuid4())))
+                                   model_path="/tmp/{}.h5".format(str(uuid.uuid4())))
 
         backtest_result = model_data.back_test(lambda x: x[:, -1])
         print(backtest_result.confusion_matrix())
