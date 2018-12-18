@@ -1,4 +1,4 @@
-from typing import Union, Iterable
+from typing import Union, Iterable, Dict, Tuple, List
 
 from pandas_ml import ConfusionMatrix
 from scipy.fftpack import dct
@@ -58,38 +58,6 @@ def ascii_hist(x, bins):
         bar = '#'*int(n*1.0*width/nmax)
         xi = '{0: <8.4g}'.format(xi).ljust(10)
         print('{0}| {1}'.format(xi, bar))
-
-
-def add_ewma_variance(df: pd.DataFrame, param: float):
-    for rx, l in param.items():
-        for col in df.columns:
-            if re.search(rx, col):
-                arr = df[col].pct_change().values
-                all_var = []
-                var = 0
-
-                for i in range(len(arr)):
-                    v = l * var + (1 - l) * arr[i] ** 2
-                    var = 0 if math.isnan(v) or math.isinf(v) else v
-                    all_var.append(var)
-
-                df[col + "_variance"] = all_var
-
-    return df
-
-
-def add_sinusoidal_time(df):
-    df["trigonometric_time.cos_dow"] = np.cos(2 * np.pi * df.index.dayofweek / 7)
-    df["trigonometric_time.sin_dow"] = np.sin(2 * np.pi * df.index.dayofweek / 7)
-    df["trigonometric_time.cos_woy"] = np.cos(2 * np.pi * df.index.week / 52)
-    df["trigonometric_time.sin_woy"] = np.sin(2 * np.pi * df.index.week / 52)
-    df["trigonometric_time.cos_doy"] = np.cos(2 * np.pi * df.index.dayofyear / 366)
-    df["trigonometric_time.sin_doy"] = np.sin(2 * np.pi * df.index.dayofyear / 366)
-    df["trigonometric_time.sin_yer"] = np.sin(2 * np.pi * (df.index.year - (df.index.year // 10) * 10) / 9)
-    df["trigonometric_time.cos_yer"] = np.cos(2 * np.pi * (df.index.year - (df.index.year // 10) * 10) / 9)
-    df["trigonometric_time.sin_dec"] = np.sin(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
-    df["trigonometric_time.cos_dec"] = np.cos(2 * np.pi * ((df.index.year - (df.index.year // 100) * 100) // 10) / 9)
-    return df
 
 
 class BackTestHistory(object):

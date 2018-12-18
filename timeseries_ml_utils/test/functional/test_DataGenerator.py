@@ -190,6 +190,7 @@ class Test_DataGenerator(TestCase):
         self.assertEqual(14, len(fit.features))
         self.assertEqual(1, len(fit.labels))
         self.assertTrue("Close" in fit.back_test_history.hist())
+        self.assertEqual(model_data.variances, fit.variances)
 
     def test_scratch(self):
         data = self.df.iloc[-60:].copy()

@@ -12,6 +12,8 @@ convert encoder-decoder function to an object where we encode, decode and eventu
 already transform the (lstm, feature) matrix as mentioned above
  
 ## TODO later
+* replace dataframe by data fetcher and use https://vaex.io/ instead of pandas
+  columns like sinusoidal time will be calculated on the fly then
 * try to concatenate columns early, so stacking different dimensions is no problem
 * enable multiple assets as multiple data frames 
 * fix location so all batches match the expected length without repeating values

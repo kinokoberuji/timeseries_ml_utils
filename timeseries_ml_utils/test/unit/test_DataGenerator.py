@@ -189,6 +189,12 @@ class Test_DataGenerator(TestCase):
         self.assertEqual(first_batch_features[0, -1, -1], prediction_ref[0, 0, 0, -1])
         self.assertEqual(last_batch_features[-1, -1, -1], prediction_ref[0, -1, 0, -1])
 
+    def test_variances(self):
+        expected = [0., 0.06, 0.0714, 0.07378267, 0.07310571, 0.07111936, 0.06851887, 0.06563223, 0.06263179, 0.05961463,
+                    0.05663775, 0.05373535, 0.0509279, 0.04822725, 0.04563974, 0.04316802, 0.04081232, 0.03857119, 0.0364421, 0.03442178]
+
+        np.testing.assert_array_almost_equal(expected, self.dg.dataframe["Close_variance"])
+
     @unittest.skip("Currently not correctly implemented")
     def test_full_set(self):
         all_batches = self.dg.get_all_batches()

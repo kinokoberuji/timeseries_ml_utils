@@ -1,4 +1,5 @@
 import os
+import unittest
 from unittest import TestCase
 from unittest.mock import Mock
 from timeseries_ml_utils.encoders import *
@@ -9,6 +10,8 @@ from ..callbacks import RelativeAccuracy
 from ..data import DataGenerator
 
 
+# FIXME test re-implemented accuracy callback and move test to unit/functional
+@unittest.skip("need to be re-implemented s accuracy measure needs re-thinking")
 class TestRelativeAccuracy(TestCase):
 
     def test_relative_accuracy(self):

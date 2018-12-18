@@ -16,8 +16,9 @@ from sklearn.metrics import r2_score
 from keras.models import load_model
 from pandas_datareader import DataReader
 from timeseries_ml_utils.encoders import identity
-from .callbacks import RelativeAccuracy, BatchHistory
-from .statistics import add_ewma_variance, add_sinusoidal_time, relative_dtw, r_square, BackTestHistory
+from timeseries_ml_utils.utils import sinusoidal_time_calculators
+from .callbacks import *
+from .statistics import *
 
 
 class DataFetcher:
@@ -76,12 +77,13 @@ class AbstractDataGenerator(keras.utils.Sequence):
                  forecast_horizon :int,
                  training_percentage: float,
                  return_sequences: bool,
+                 variances: List[Tuple[str, float]],
                  is_test: bool):
         'Initialization'
         logging.info("use features: " + ", ".join([f + " rescale: " + str(r) for f, r in features]))
         logging.info("use labels: " + ", ".join([l + " rescale: " + str(r) for l, r in labels]))
         self.shuffle = False
-        self.dataframe = dataframe.dropna()
+        self.dataframe = self._add_sinusoidal_time(self._add_ewma_variance(dataframe, variances)).dropna()
         self.features = features
         self.labels = labels
         self.batch_size = batch_size
@@ -90,6 +92,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.forecast_horizon = forecast_horizon
         self.training_percentage = training_percentage
         self.return_sequences = return_sequences
+        self.variances = variances
         self.is_test = is_test
 
         # calculate length
@@ -118,6 +121,29 @@ class AbstractDataGenerator(keras.utils.Sequence):
         item_zero = self[0]
         self.batch_feature_shape = item_zero[0].shape
         self.batch_label_shape = item_zero[1].shape
+
+    @staticmethod
+    def _add_ewma_variance(df, param):
+        for col, l in param:
+            arr = df[col].pct_change().values
+            all_var = []
+            var = 0
+
+            for i in range(len(arr)):
+                v = l * var + (1 - l) * arr[i] ** 2
+                var = 0 if math.isnan(v) or math.isinf(v) else v
+                all_var.append(var)
+
+            df[col + "_variance"] = all_var
+
+        return df
+
+    @staticmethod
+    def _add_sinusoidal_time(df):
+        for sin_time, calculator in sinusoidal_time_calculators.items():
+            df["trigonometric_time." + sin_time] = calculator(df)
+
+        return df
 
     def get_df_columns(self):
         return self.dataframe.columns.values.tolist()
@@ -350,43 +376,40 @@ class TestDataGenerator(AbstractDataGenerator):
                                                 data_generator.forecast_horizon,
                                                 training_percentage or data_generator.training_percentage,
                                                 data_generator.return_sequences,
+                                                data_generator.variances,
                                                 True)
 
     def on_epoch_end(self):
         pass
 
 
-# TODO This class should be re-written as we need to
-#  find a way to persist fitted models inclusive data generating cats like lstm, window and batch sizes
-#  find a way to provide a predict function
-#  find a way to provide fit quality statistics and backtest results
+# FIXME solve circular dependency with DataGenerator adding the sinusoidal time
 class PredictiveDataGenerator(AbstractDataGenerator):
 
     # we need to extend DataGenerator because of windowing, encoding and decoding ...
-    def __init__(self, model_file_name: str, data_fetcher: pd.DataFrame):  # FIXME accept DataFetcher only
-        self.model_file_name = model_file_name
+    def __init__(self, model_path: str, data_fetcher: pd.DataFrame):  # FIXME accept DataFetcher only
+        self.model_file_name = os.path.join(model_path, 'model')
 
         # load all parameters but the dataframe form a file
         with io.open(self.model_file_name + '.dg', 'rb') as f:
-            epoch_hist, batch_hist, back_test, features, labels, \
-            batch_size, lstm_memory_size, aggregation_window_size, forecast_horizon, \
-            return_sequences = cloudpickle.load(f)
+            pickles = cloudpickle.load(f)
 
         super(PredictiveDataGenerator, self).__init__(data_fetcher,  # getDataFrame
-                                                      features,
-                                                      labels,
-                                                      batch_size,
-                                                      lstm_memory_size,
-                                                      aggregation_window_size,
-                                                      forecast_horizon,
+                                                      pickles[3],   # features
+                                                      pickles[4],   # labels
+                                                      pickles[5],   # batch_size
+                                                      pickles[6],   # lstm_memory_size
+                                                      pickles[7],   # aggregation_window_size
+                                                      pickles[8],   # forecast_horizon
                                                       1.0,
-                                                      return_sequences,
+                                                      pickles[9],   # return_sequences
+                                                      pickles[10],  # variances
                                                       False)
 
         self.model = load_model(self.model_file_name + '.h5')
-        self.epoch_hist = epoch_hist
-        self.batch_hist = batch_hist
-        self.back_test_history: BackTestHistory = back_test
+        self.epoch_hist = pickles[0]  # epoch_hist
+        self.batch_hist = pickles[1]  # batch_hist
+        self.back_test_history: BackTestHistory = pickles[2]  # back_test
 
     def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray] = None):
         return super(PredictiveDataGenerator, self).back_test(batch_predictor or self.model.predict)
@@ -443,22 +466,32 @@ class DataGenerator(AbstractDataGenerator):
                  training_percentage: float = 0.8,
                  return_sequences: bool = False,
                  variances: Dict[str, float] = {".*": 0.94},
-                 model_path: str = "{}/{}-{}".format(tempfile.gettempdir(), datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"), str(uuid.uuid4()))):
-        super(DataGenerator, self).__init__(add_sinusoidal_time(add_ewma_variance(dataframe, variances)),
-                                            [(col, r) for col in dataframe.columns for f, r in features.items() if re.search(f, col)],
-                                            [(col, r) for col in dataframe.columns for l, r in labels.items() if re.search(l, col)],
+                 model_path: str = "{}/{}-{}".format(tempfile.gettempdir(), datetime.now().strftime("%Y-%m-%d-%H-%M-%S"), str(uuid.uuid4()))):
+
+        # we need to resolve the regular expressions and therefore we already need to know the additional columns
+        # added by the super class. this is the sinusoidal time as well as the variances
+        expanded_variances = [(col, r) for col in dataframe.columns for f, r in variances.items() if re.search(f, col)]
+        columns = list(dataframe.columns.values) + \
+                  [col + "_variance" for col, _ in expanded_variances] + \
+                  ["trigonometric_time." + sin_time for sin_time in sinusoidal_time_calculators.keys()]
+
+        super(DataGenerator, self).__init__(dataframe,
+                                            [(col, r) for col in columns for f, r in features.items() if re.search(f, col)],
+                                            [(col, r) for col in columns for l, r in labels.items() if re.search(l, col)],
                                             batch_size,
                                             lstm_memory_size,
                                             aggregation_window_size,
                                             aggregation_window_size if forecast_horizon is None else forecast_horizon,
                                             training_percentage,
                                             return_sequences,
+                                            expanded_variances,
                                             False)
 
         super(DataGenerator, self).on_epoch_end()
 
         # make directories and file name
         os.makedirs(model_path, exist_ok=True)
+        self.model_path = model_path
         self.model_filename = os.path.join(model_path, "model")
 
     def as_test_data_generator(self, training_percentage: float = None) -> TestDataGenerator:
@@ -512,8 +545,9 @@ class DataGenerator(AbstractDataGenerator):
                 self.lstm_memory_size,
                 self.aggregation_window_size,
                 self.forecast_horizon,
-                self.return_sequences
+                self.return_sequences,
+                self.variances
             ], f)
 
         # return a re-usable predictive data generator
-        return PredictiveDataGenerator(self.model_filename, test_data.dataframe)
+        return PredictiveDataGenerator(self.model_path, test_data.dataframe)
