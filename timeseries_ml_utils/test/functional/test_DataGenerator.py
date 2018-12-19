@@ -60,7 +60,7 @@ class Test_DataGenerator(TestCase):
         print("Phi: {}".format(confusion_matrix.MCC))
         self.assertEqual(8, confusion_matrix.TP)
         self.assertEqual(13, confusion_matrix.TN)
-        self.assertEqual(12, confusion_matrix.FP)
+        self.assertEqual(11, confusion_matrix.FP)
         self.assertEqual(15, confusion_matrix.FN)
 
         # we expect some r2 which is maximum as good as just using the last value (reference value)
@@ -178,15 +178,17 @@ class Test_DataGenerator(TestCase):
                       "verbose": 1}
 
         fit = model_data.fit(model, train_args, frequency=10, relative_accuracy_function=r_square)
+        last_backtest_date = fit.back_test_history.reference_index[-1]
         prediction = fit.predict(-1)
 
+        self.assertEqual(len(data) - 1, data.index.get_loc(last_backtest_date) + model_data.forecast_horizon)
         self.assertEqual(data.index[-1], prediction[-1])
         self.assertEqual(52 * 5, fit.lstm_memory_size)
         self.assertEqual(16, fit.forecast_horizon)
         self.assertEqual(16, fit.aggregation_window_size)
         self.assertEqual(10, fit.batch_size)
         self.assertEqual(False, fit.return_sequences)
-        self.assertEqual(13, len(fit.batch_hist))
+        self.assertEqual(12, len(fit.batch_hist))
         self.assertEqual(1, len(fit.epoch_hist))
         self.assertEqual(315, len(fit.dataframe))
         self.assertEqual(14, len(fit.features))

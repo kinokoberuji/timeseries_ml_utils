@@ -156,7 +156,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def __len__(self):
         'Denotes the number of batches per epoch'
-        cutoff = math.ceil(self.length * self.training_percentage)
+        cutoff = math.floor(self.length * self.training_percentage)
         if self.is_test:
             return self.length - cutoff
         else:
