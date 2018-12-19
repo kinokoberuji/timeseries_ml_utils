@@ -117,7 +117,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         # derived properties
         # we only know the shape (self.batch_size, self.lstm_memory_size, ??) but the number of features depend on the
-        # encoder/decoder so we can not kno them a priori
+        # encoder/decoder so we can not know them in advance
         item_zero = self[0]
         self.batch_feature_shape = item_zero[0].shape
         self.batch_label_shape = item_zero[1].shape
@@ -254,6 +254,13 @@ class AbstractDataGenerator(keras.utils.Sequence):
         return array3D.transpose((1, 0, 2)) \
                       .reshape((-1, self.aggregation_window_size * len(array3D)))
 
+    def _predict(self, batch_predictor: Callable[[np.ndarray], np.ndarray], i: int = -1):
+        assert i < 0
+
+        i = self.predictive_length() + i
+        decoded_batch, index, batch_ref_values, batch_ref_index = self._decode_batch(i, batch_predictor, self.labels)
+        return decoded_batch[-1], index[-1], batch_ref_values[-1], batch_ref_index[-1]
+
     def back_test(self,
                   batch_predictor: Callable[[np.ndarray], np.ndarray],
                   column_decoders: List[Tuple[str, Callable[[np.ndarray, float], np.ndarray]]] = None
@@ -269,16 +276,17 @@ class AbstractDataGenerator(keras.utils.Sequence):
         errors = np.hstack(batches[2])
         r_squares = np.hstack(batches[3])
         reference_values = np.hstack(batches[4])
+        ref_index = [y for x in batches[5] for y in x]
 
         standard_deviations = np.array([errors[i, :, -1, j].std()
                                         for i in range(errors.shape[0]) for j in range(errors.shape[-1])])
 
-        return BackTestHistory(self._get_column_names(self.labels), prediction, reference_values, labels, r_squares,
-                               standard_deviations)
+        return BackTestHistory(self._get_column_names(self.labels), prediction, reference_values, ref_index, labels,
+                               r_squares, standard_deviations)
 
     def _back_test_batch(self, i, batch_predictor, decoders=None):
         # make a prediction
-        prediction, _, _, _ = self._decode_batch(i, batch_predictor, decoders or self.labels)
+        prediction, _, _, batch_ref_index = self._decode_batch(i, batch_predictor, decoders or self.labels)
 
         # get the labels.
         # Note that we do not want to encode the labels this time so we pass identity encoder and decoder
@@ -301,7 +309,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         # reshape the reference values
         ref_values = ref_values.reshape(r_squares.shape)
-        return prediction, labels, errors, r_squares, ref_values
+        return prediction, labels, errors, r_squares, ref_values, batch_ref_index
 
     def _decode_batch(self, i, predictor_function, decoding_functions):
         # get values
@@ -409,45 +417,13 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         self.model = load_model(self.model_file_name + '.h5')
         self.epoch_hist = pickles[0]  # epoch_hist
         self.batch_hist = pickles[1]  # batch_hist
-        self.back_test_history: BackTestHistory = pickles[2]  # back_test
+        self.back_test_history: BackTestHistory = BackTestHistory(*pickles[2])  # back_test
 
     def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray] = None):
         return super(PredictiveDataGenerator, self).back_test(batch_predictor or self.model.predict)
 
-    def predict(self, i: int):
-        # FIXME potentially needs to be re-done
-        timedelta = self._get_time_delta()
-        df = self.dataframe
-        df_dates = df.index
-        df_len = len(df)
-
-        # get features and locations in dataframe
-        features, index = self._get_last_features(i) if i < 0 else self._get_features_loc(i)
-        start_loc_features = df.index.get_loc(index[0])
-        start_loc_labels = start_loc_features + self.forecast_horizon
-
-        # for some reason we need to fake a batch for the predict method
-        features_batch = np.repeat([features], self.batch_size, axis=0)
-        prediction, _ = self._decode(start_loc_labels, self.model.predict(features_batch)[-1], self.labels)
-        stop_loc_labels = start_loc_labels + prediction.shape[2]
-
-        # calculate timeline for past and predicted values
-        timeline = [df_dates[i] if i < df_len else df_dates[-1] + timedelta * (i - df_len + 1)
-                    for i in range(start_loc_features, stop_loc_labels)]
-
-        # generate the prediction dataframe
-        prediction_df = pd.DataFrame({
-            col + " predicted": np.hstack([np.repeat(np.nan, len(timeline) - prediction.shape[-1]), prediction[i][-1]])
-            for i, (col, _) in enumerate(self.labels)
-        }, index=timeline)
-
-        # join the historic dataframe
-        # columns = list(set(self._get_column_names(self.features) + self._get_column_names(self.labels)))
-        columns = self._get_column_names(self.labels)
-        prediction_df = prediction_df.join(df[columns], how='left')
-
-        # todo add upper and lower band
-        return prediction_df
+    def predict(self, i: int = -1):
+        return self._predict(self.model.predict, i)
 
     def _get_time_delta(self):
         ix = self.dataframe.index
@@ -538,7 +514,7 @@ class DataGenerator(AbstractDataGenerator):
             cloudpickle.dump([
                 epoch_hist,
                 batch_hist,
-                back_test,  #[column_names, predictions, reference_values, labels, r_squares, standard_deviations, confidence]
+                back_test.get_all_fields(),
                 self.features,
                 self.labels,
                 self.batch_size,

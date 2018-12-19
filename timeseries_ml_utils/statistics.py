@@ -62,18 +62,24 @@ def ascii_hist(x, bins):
 
 class BackTestHistory(object):
 
-    def __init__(self, column_names, predictions, reference_values, labels, r_squares, standard_deviations,
-                 confidence=.80):
+    def __init__(self, column_names, predictions, reference_values, reference_index, labels,
+                 r_squares, standard_deviations, confidence=.80):
         self.column_names = column_names
         self.predictions = predictions
         self.reference_values = reference_values
+        self.reference_index = reference_index
         self.labels = labels
         self.r_squares = r_squares
         self.standard_deviations = standard_deviations
-        self.confidence = self._get_confidence_factor(confidence)
+        self.confidence = confidence
+        self.confidence_factor = self._get_confidence_factor(confidence)
+
+    def get_all_fields(self):
+        return [self.column_names,self.predictions, self.reference_values, self.reference_index, self.labels,
+                self.r_squares, self.standard_deviations, self.confidence]
 
     def set_confidence(self, confidence=.80):
-        self.confidence = self._get_confidence_factor(confidence)
+        self.confidence_factor = self._get_confidence_factor(confidence)
 
     @staticmethod
     def _get_confidence_factor(confidence):
@@ -102,18 +108,18 @@ class BackTestHistory(object):
 
         return result
 
-    def hist(self, bins: Union[int, Iterable, str] = 10):
+    def hist(self, bins: Union[int, Iterable, str] = 100):
         return {label: np.histogram(self.r_squares[i, :, -1], bins) for i, label in enumerate(self.column_names)}
 
     def back_test_confidence(self):
         # TODO back test how often a label exceeded the confidence
         pass
 
-    def plot_hist(self, figsize=None):
+    def plot_hist(self, figsize=None, bins: int = 100):
         fig = plt.figure(figsize=figsize)
 
         for i, label in enumerate(self.column_names):
-            plt.hist(self.r_squares[i, :, -1], label=label)
+            plt.hist(self.r_squares[i, :, -1], bins=bins, label=label)
 
         plt.legend(loc='best')
         plt.title('r²')
@@ -129,9 +135,9 @@ class BackTestHistory(object):
             y = self.labels[i, j, -1]
             y_hat = self.predictions[i, j, -1]
 
-            if self.confidence > 0:
-                upper = y_hat + self.confidence * self.standard_deviations
-                lower = y_hat - self.confidence * self.standard_deviations
+            if self.confidence_factor > 0:
+                upper = y_hat + self.confidence_factor * self.standard_deviations
+                lower = y_hat - self.confidence_factor * self.standard_deviations
                 plt.fill_between(range(y_hat.shape[0]), upper, lower, alpha=.5)
 
             plt.plot(y_hat, label='predict')

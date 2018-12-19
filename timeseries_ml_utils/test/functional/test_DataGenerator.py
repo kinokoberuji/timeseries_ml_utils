@@ -178,7 +178,9 @@ class Test_DataGenerator(TestCase):
                       "verbose": 1}
 
         fit = model_data.fit(model, train_args, frequency=10, relative_accuracy_function=r_square)
+        prediction = fit.predict(-1)
 
+        self.assertEqual(data.index[-1], prediction[-1])
         self.assertEqual(52 * 5, fit.lstm_memory_size)
         self.assertEqual(16, fit.forecast_horizon)
         self.assertEqual(16, fit.aggregation_window_size)

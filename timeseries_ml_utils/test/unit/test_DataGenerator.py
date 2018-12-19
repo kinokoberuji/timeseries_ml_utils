@@ -159,7 +159,7 @@ class Test_DataGenerator(TestCase):
         np.testing.assert_array_equal(features[-1, -1], decoded_batch[-1, -1, -1])
 
     def test_back_test_batch(self):
-        prediction, labels, errors, r_squares, reference_values = self.dg._back_test_batch(0, self.last_lstm_features_lambda, self.dg.labels)
+        prediction, labels, errors, r_squares, reference_values, batch_ref_index = self.dg._back_test_batch(0, self.last_lstm_features_lambda, self.dg.labels)
         expected = labels[-1, -1, -1] - self.dg.forecast_horizon
         self.assertEqual(prediction.shape, labels.shape)
         np.testing.assert_array_equal(expected, prediction[-1, -1, -1])
@@ -194,6 +194,10 @@ class Test_DataGenerator(TestCase):
                     0.05663775, 0.05373535, 0.0509279, 0.04822725, 0.04563974, 0.04316802, 0.04081232, 0.03857119, 0.0364421, 0.03442178]
 
         np.testing.assert_array_almost_equal(expected, self.dg.dataframe["Close_variance"])
+
+    def test_predict(self):
+        batch, index, ref_values, ref_index = self.dg._predict(lambda x: x[:, -1])
+        self.assertEqual(self.df.index[-1], ref_index)
 
     @unittest.skip("Currently not correctly implemented")
     def test_full_set(self):
