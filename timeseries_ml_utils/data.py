@@ -416,7 +416,15 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         self.model = load_model(self.model_file_name + '.h5')
         self.epoch_hist = pickles[0]  # epoch_hist
         self.batch_hist = pickles[1]  # batch_hist
-        self.back_test_history: BackTestHistory = BackTestHistory(*pickles[2])  # back_test
+
+        column_names, predictions, reference_values, reference_index, labels, r_squares, self.standard_deviations, confidence = pickles[2]  # back_test
+        self.back_test_history: BackTestHistory = BackTestHistory(column_names,
+                                                                  predictions,
+                                                                  reference_values,
+                                                                  reference_index,
+                                                                  labels, r_squares,
+                                                                  self.standard_deviations,
+                                                                  confidence)
 
     # TODO we might fix the backtest metod to provide the model.predict as default
     # def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray] = None):
@@ -435,19 +443,15 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         df_past = self.dataframe[columns][loc_start:loc_end]
 
         # make a dataframe wor the prediction
-        # y_hat = self.predictions[i, j, -1]
         y_hat = {col: prediction[i, -1] for i, col in enumerate(columns)}
-        # upper = y_hat + self.confidence_factor * self.standard_deviations
-        upper = {f'{col}_lower': prediction[i, -1] * 0.9 for i, col in enumerate(columns)}  # FIXME 0.9
-        # lower = y_hat - self.confidence_factor * self.standard_deviations
-        lower = {f'{col}_upper': prediction[i, -1] * 1.1 for i, col in enumerate(columns)}  # FIXME 1.1
+        lower = {f'{col}_lower': prediction[i, -1] - self.standard_deviations * 1.5 for i, col in enumerate(columns)}  # FIXME 1.5
+        upper = {f'{col}_upper': prediction[i, -1] + self.standard_deviations * 1.5 for i, col in enumerate(columns)}  # FIXME 1.5
         df_predict = pd.DataFrame({**y_hat, **lower, **upper},
                                   index=pd.date_range(start=df_past.index[-1], periods=prediction.shape[-1] + 1)[1:])
 
         # concat the past and prediction
         prediction_df = pd.concat([df_past, df_predict], sort=True)
-
-        return prediction_df #prediction, index, ref_values, ref_index
+        return prediction_df
 
     def _get_time_delta(self):
         ix = self.dataframe.index
