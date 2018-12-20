@@ -60,6 +60,11 @@ def ascii_hist(x, bins):
         print('{0}| {1}'.format(xi, bar))
 
 
+def get_std_confidence_factor(confidence):
+    z_score = st.norm.ppf(1 - (1 - confidence) / 2)
+    return z_score if confidence is not None else 0
+
+
 class BackTestHistory(object):
 
     def __init__(self, column_names, predictions, reference_values, reference_index, labels,
@@ -72,18 +77,14 @@ class BackTestHistory(object):
         self.r_squares = r_squares
         self.standard_deviations = standard_deviations
         self.confidence = confidence
-        self.confidence_factor = self._get_confidence_factor(confidence)
+        self.confidence_factor = get_std_confidence_factor(confidence)
 
     def get_all_fields(self):
         return [self.column_names,self.predictions, self.reference_values, self.reference_index, self.labels,
                 self.r_squares, self.standard_deviations, self.confidence]
 
     def set_confidence(self, confidence=.80):
-        self.confidence_factor = self._get_confidence_factor(confidence)
-
-    @staticmethod
-    def _get_confidence_factor(confidence):
-        return st.norm.ppf(confidence) if confidence is not None else 0
+        self.confidence_factor = get_std_confidence_factor(confidence)
 
     def get_measures(self):
         return self.predictions, self.labels, self.r_squares, self.standard_deviations

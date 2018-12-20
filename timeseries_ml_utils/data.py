@@ -431,9 +431,6 @@ class PredictiveDataGenerator(AbstractDataGenerator):
     #    return super(PredictiveDataGenerator, self).back_test(batch_predictor or self.model.predict)
 
     def predict(self, i: int = -1, confidence=.80):
-        # todo get all the past data from the daaframe from red_idex_loc - lstm_memorysize
-        #  add the prediction to the dataframe (add dates)
-        #  also add the conidence band to the predction
         prediction, index, ref_values, ref_index = self._predict(self.model.predict, i)
 
         # get all the past data from the data frame from past lstm_memorysize rows
@@ -443,9 +440,10 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         df_past = self.dataframe[columns][loc_start:loc_end]
 
         # make a dataframe wor the prediction
+        z = get_std_confidence_factor(confidence)
         y_hat = {col: prediction[i, -1] for i, col in enumerate(columns)}
-        lower = {f'{col}_lower': prediction[i, -1] - self.standard_deviations * 1.5 for i, col in enumerate(columns)}  # FIXME 1.5
-        upper = {f'{col}_upper': prediction[i, -1] + self.standard_deviations * 1.5 for i, col in enumerate(columns)}  # FIXME 1.5
+        lower = {f'{col}_lower': prediction[i, -1] - self.standard_deviations * z for i, col in enumerate(columns)}
+        upper = {f'{col}_upper': prediction[i, -1] + self.standard_deviations * z for i, col in enumerate(columns)}
         df_predict = pd.DataFrame({**y_hat, **lower, **upper},
                                   index=pd.date_range(start=df_past.index[-1], periods=prediction.shape[-1] + 1)[1:])
 
