@@ -196,7 +196,7 @@ class Test_DataGenerator(TestCase):
         np.testing.assert_array_almost_equal(expected, self.dg.dataframe["Close_variance"])
 
     def test_predict(self):
-        batch, index, ref_values, ref_index = self.dg._predict(lambda x: x[:, -1])
+        prediction, index, ref_values, ref_index = self.dg._predict(lambda x: x[:, -1])
         self.assertEqual(self.df.index[-1], ref_index)
 
     def test_last_back_test_element(self):

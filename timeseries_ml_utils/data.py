@@ -259,7 +259,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
         i = self.predictive_length() + i
         decoded_batch, index, batch_ref_values, batch_ref_index = self._decode_batch(i, batch_predictor, self.labels)
-        return decoded_batch[-1], index[-1], batch_ref_values[-1], batch_ref_index[-1]
+        return decoded_batch[:, -1], index[-1], batch_ref_values[-1], batch_ref_index[-1]
 
     def back_test(self,
                   batch_predictor: Callable[[np.ndarray], np.ndarray],
@@ -391,7 +391,6 @@ class TestDataGenerator(AbstractDataGenerator):
         pass
 
 
-# FIXME solve circular dependency with DataGenerator adding the sinusoidal time
 class PredictiveDataGenerator(AbstractDataGenerator):
 
     # we need to extend DataGenerator because of windowing, encoding and decoding ...
@@ -419,11 +418,36 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         self.batch_hist = pickles[1]  # batch_hist
         self.back_test_history: BackTestHistory = BackTestHistory(*pickles[2])  # back_test
 
-    def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray] = None):
-        return super(PredictiveDataGenerator, self).back_test(batch_predictor or self.model.predict)
+    # TODO we might fix the backtest metod to provide the model.predict as default
+    # def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray] = None):
+    #    return super(PredictiveDataGenerator, self).back_test(batch_predictor or self.model.predict)
 
-    def predict(self, i: int = -1):
-        return self._predict(self.model.predict, i)
+    def predict(self, i: int = -1, confidence=.80):
+        # todo get all the past data from the daaframe from red_idex_loc - lstm_memorysize
+        #  add the prediction to the dataframe (add dates)
+        #  also add the conidence band to the predction
+        prediction, index, ref_values, ref_index = self._predict(self.model.predict, i)
+
+        # get all the past data from the data frame from past lstm_memorysize rows
+        columns = self._get_column_names(self.labels)
+        loc_end = self.dataframe.index.get_loc(ref_index) + 1
+        loc_start = max(0, loc_end - self.lstm_memory_size)
+        df_past = self.dataframe[columns][loc_start:loc_end]
+
+        # make a dataframe wor the prediction
+        # y_hat = self.predictions[i, j, -1]
+        y_hat = {col: prediction[i, -1] for i, col in enumerate(columns)}
+        # upper = y_hat + self.confidence_factor * self.standard_deviations
+        upper = {f'{col}_lower': prediction[i, -1] * 0.9 for i, col in enumerate(columns)}  # FIXME 0.9
+        # lower = y_hat - self.confidence_factor * self.standard_deviations
+        lower = {f'{col}_upper': prediction[i, -1] * 1.1 for i, col in enumerate(columns)}  # FIXME 1.1
+        df_predict = pd.DataFrame({**y_hat, **lower, **upper},
+                                  index=pd.date_range(start=df_past.index[-1], periods=prediction.shape[-1] + 1)[1:])
+
+        # concat the past and prediction
+        prediction_df = pd.concat([df_past, df_predict], sort=True)
+
+        return prediction_df #prediction, index, ref_values, ref_index
 
     def _get_time_delta(self):
         ix = self.dataframe.index

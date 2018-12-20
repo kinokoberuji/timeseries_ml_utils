@@ -182,7 +182,7 @@ class Test_DataGenerator(TestCase):
         prediction = fit.predict(-1)
 
         self.assertEqual(len(data) - 1, data.index.get_loc(last_backtest_date) + model_data.forecast_horizon)
-        self.assertEqual(data.index[-1], prediction[-1])
+        self.assertEqual(data.index[-1], prediction.index[-model_data.forecast_horizon - 1])
         self.assertEqual(52 * 5, fit.lstm_memory_size)
         self.assertEqual(16, fit.forecast_horizon)
         self.assertEqual(16, fit.aggregation_window_size)
@@ -195,6 +195,13 @@ class Test_DataGenerator(TestCase):
         self.assertEqual(1, len(fit.labels))
         self.assertTrue("Close" in fit.back_test_history.hist())
         self.assertEqual(model_data.variances, fit.variances)
+
+    def test_prediction(self):
+        model_path = os.path.join(self.path, "resources", "2018-12-19-18-26-31-f6a6989b-4b85-453a-a7e7-d85d3aee8a44")
+        predictor = PredictiveDataGenerator(model_path, self.df)
+        prediction = predictor.predict()
+        self.assertTrue(True)
+        pass
 
     def test_scratch(self):
         data = self.df.iloc[-60:].copy()
