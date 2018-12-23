@@ -1,3 +1,4 @@
+import traceback
 import unittest
 from unittest import TestCase
 
@@ -94,13 +95,7 @@ class Test_DataGenerator(TestCase):
 
     def test_encode(self):
         encoded = self.dg._encode(np.array([[[13, 14]]]), np.array([[13]]), [("", normalize)])
-        np.testing.assert_array_equal(np.array([[[13, 14]]]) / 13 - 1, encoded)
-
-    def test_concatenate_vectors(self):
-        # turn shape (features, batch/lstm size, window) into (batch/lstm size, features * window)
-        separated_columns = np.array([[[1, 2, 3, 4], [1, 2, 3, 4]], [[1, 2, 3, 4], [1, 2, 3, 4]]])
-        concatenated_columns = np.array([[1, 2, 3, 4, 1, 2, 3, 4], [1, 2, 3, 4, 1, 2, 3, 4]])
-        np.testing.assert_array_equal(concatenated_columns, self.dg._concatenate_vectors(separated_columns))
+        np.testing.assert_array_equal(np.array([[13, 14]]) / 13 - 1, encoded)
 
     def test_build_matrix(self):
         floc = self.dg._get_features_loc(0)
@@ -253,9 +248,6 @@ class Test_DataGenerator_aggregation1(Test_DataGenerator):
         self.assertEqual(len(self.df) // 2, length_test)
         super(Test_DataGenerator_aggregation1, self).test_len()
 
-    def test_concatenate_vectors(self):
-        pass
-
     def test_decode(self):
         pass
 
@@ -279,9 +271,6 @@ class Test_DataGenerator_swapped_lstm_batch_size(Test_DataGenerator):
         self.assertEqual((self.dg.batch_size, self.dg.lstm_memory_size, self.dg.aggregation_window_size),
                          self.dg.batch_feature_shape)
 
-    def test_concatenate_vectors(self):
-        pass
-
     def test_decode(self):
         pass
 
@@ -301,9 +290,6 @@ class Test_DataGenerator_multiple_features(Test_DataGenerator):
         )
         self.dg_test = self.dg.as_test_data_generator(0.5)
 
-    def test_concatenate_vectors(self):
-        pass
-
     def test_decode(self):
         pass
 
@@ -321,15 +307,14 @@ class Test_DataGenerator_multiple_features(Test_DataGenerator):
         # FIXME self.assertEqual(len(self.dg), prediction.shape[1])
 
 
-@unittest.skip("not implemented yet")
-class Test_DataGenerator_multiple_features_diffene_shape(Test_DataGenerator):
+class Test_DataGenerator_multiple_features_diffent_shape(Test_DataGenerator):
 
     def __init__(self, method_name):
-        super(Test_DataGenerator_multiple_features_diffene_shape, self).__init__(method_name)
+        super(Test_DataGenerator_multiple_features_diffent_shape, self).__init__(method_name)
         try:
             self.dg = DataGenerator(
                 self.df,
-                {"Close$": identity, "Volume": lambda x, ref_value, is_encode: np.array([1.2])},
+                {"Close$": identity, "Volume$": lambda x, ref_value, is_encode: np.array([1.2])},
                 {"Close$": identity},
                 batch_size=2,
                 lstm_memory_size=3,
@@ -340,16 +325,35 @@ class Test_DataGenerator_multiple_features_diffene_shape(Test_DataGenerator):
 
         except Exception as e:
             print("Ingore this error as its not yet implemented")
-            print(e)
+            print(traceback.format_exc())
 
-    def test_concatenate_vectors(self):
-        pass
+    def test_build_matrix(self):
+        floc = self.dg._get_features_loc(0)
+        lloc = self.dg._get_labels_loc(0)
+        feature_matrix, feature_index = self.dg._build_matrix(floc, floc, self.dg.features, True)
+        labels_matrix, labels_index = self.dg._build_matrix(lloc, lloc, self.dg.labels, False)
+
+        # instead of the full aggregation indow we just return an array of len 1 in the encoder
+        self.assertEqual((self.dg.batch_size, self.dg.lstm_memory_size, 1 + self.dg.aggregation_window_size), feature_matrix.shape)
+        self.assertEqual((self.dg.batch_size, self.dg.aggregation_window_size * len(self.dg.labels)), labels_matrix.shape)
+        self.assertEqual(self.dg.forecast_horizon, self.df.index.get_loc(labels_index[0][0]) - self.df.index.get_loc(feature_index[0][0]))
 
     def test_decode(self):
         pass
 
+    def test_get_labels_batch(self):
+        pass
 
+    def test_get_last_features(self):
+        pass
 
-# TODO allow forecast wirndow 0, try to leaarn linear regression
+    def test_last_back_test_element(self):
+        pass
+
+    def test_backtest(self):
+        pass
+
+    def test_back_test_batch(self):
+        pass
+
 # TODO make a test set for return_sequence = True
-# TODO test multiple features

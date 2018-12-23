@@ -201,10 +201,6 @@ class AbstractDataGenerator(keras.utils.Sequence):
         # encode data like normalization
         matrix = self._encode(matrix, ref_values, column_encoders)
 
-        # concatenate all feature and label vectors into one vector
-        # shape = (lstm_memory_size + batch_size, window * feature/label_columns)
-        matrix = self._concatenate_vectors(matrix)
-
         # make sliding window of lstm_memory_size
         # shape = (batchsize, lstm_memory_size, window * feature/label_columns)
         matrix = [matrix[i:i + self.lstm_memory_size] for i in range(self.batch_size)] if is_lstm_aggregate \
@@ -243,16 +239,12 @@ class AbstractDataGenerator(keras.utils.Sequence):
         return ref_values, ref_index
 
     def _encode(self, aggregate_matrix, reference_values, encoding_functions):
-        encoded = np.stack([np.array([func(aggregate_matrix[i, row], reference_values[i, row], True)
-                                      for row in (range(aggregate_matrix.shape[1]))])
-                            for i, (col, func) in enumerate(encoding_functions)], axis=0)
+
+        encoded = np.array([np.hstack([func(aggregate_matrix[i, row], reference_values[i, row], True)
+                                       for i, (col, func) in enumerate(encoding_functions)])
+                            for row in (range(aggregate_matrix.shape[1]))])
 
         return encoded
-
-    def _concatenate_vectors(self, array3D):
-        # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
-        return array3D.transpose((1, 0, 2)) \
-                      .reshape((-1, self.aggregation_window_size * len(array3D)))
 
     def _predict(self, batch_predictor: Callable[[np.ndarray], np.ndarray], i: int = -1):
         assert i < 0
