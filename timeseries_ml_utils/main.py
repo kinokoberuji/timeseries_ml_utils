@@ -52,4 +52,4 @@ if __name__ == "__main__":
                   "workers": 4,
                   "shuffle": False}
 
-    model_data.fit(model, train_args, frequency=10, relative_accuracy_function=relative_dtw_2, log_dir="/tmp/foo.123/")
+    model_data.fit(model, train_args, log_dir="/tmp/foo.123/")

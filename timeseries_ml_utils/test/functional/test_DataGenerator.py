@@ -2,7 +2,7 @@ import uuid
 from unittest import TestCase
 import numpy as np
 from keras import Sequential
-from keras.layers import LSTM
+from keras.layers import LSTM, Flatten, Dense
 from numpy.random.mtrand import RandomState
 
 import timeseries_ml_utils.test
@@ -177,7 +177,7 @@ class Test_DataGenerator(TestCase):
                       "shuffle": False,
                       "verbose": 1}
 
-        fit = model_data.fit(model, train_args, frequency=10, relative_accuracy_function=r_square)
+        fit = model_data.fit(model, train_args)
         last_backtest_date = fit.back_test_history.reference_index[-1]
         prediction = fit.predict(-1)
 
@@ -201,7 +201,63 @@ class Test_DataGenerator(TestCase):
         predictor = PredictiveDataGenerator(model_path, self.df)
         prediction = predictor.predict()
         self.assertTrue(True)
-        pass
+
+    def test_binary_classifier(self):
+        # encoders and decoders
+        def binary_encode_decode(y, ref, encode):
+            if encode:
+                x = np.arange(0, len(y))
+                y = normalize(y, ref, True)
+                slope, intercept, r_value, p_value, std_err = linregress(x, y)
+                return np.array([1 if slope > 0 else 0])
+            else:
+                return y
+
+        # fetch data
+        data = self.df.iloc[-315:].copy()
+
+        # make some data model
+        model_data = DataGenerator(data,
+                                   {"^trigonometric": identity,
+                                    "(Open|High|Low|Close)$": normalize},
+                                   {"Close$": binary_encode_decode},
+                                   aggregation_window_size=16, batch_size=10)
+
+        # make a single layered keras model
+        model = Sequential(name="LSTM-Model-1")
+        model.add(LSTM(model_data.batch_label_shape[-1],
+                       name="LSTM-Layer-1",
+                       batch_input_shape=model_data.batch_feature_shape,
+                       activation='tanh',
+                       dropout=0,
+                       recurrent_dropout=0,
+                       stateful=True,
+                       return_sequences=True))
+
+        # flatten result of lstm layer
+        model.add(Flatten())
+
+        # we want to predict a binary outbout
+        model.add(Dense(1, activation="softmax"))
+
+        # compile model
+        model.compile("Adam", loss="mse", metrics=['mae', 'acc'])
+
+        train_args = {"epochs": 1,
+                      "use_multiprocessing": True,
+                      "workers": 4,
+                      "shuffle": False,
+                      "verbose": 1}
+
+        fit = model_data.fit(model, train_args, quality_measure=lambda y, y_hat, _: abs(y_hat - y), predict_labels=False)
+        back_test = fit.back_test_history
+        last_backtest_date = back_test.reference_index[-1]
+        prediction = fit.predict(-1)
+
+        self.assertEqual(len(data) - 1, data.index.get_loc(last_backtest_date) + model_data.forecast_horizon)
+        np.testing.assert_array_equal([0, 1], back_test.hist(bins=1)['Close'][1])
+
+        print("pred", prediction)
 
     def test_scratch(self):
         data = self.df.iloc[-60:].copy()

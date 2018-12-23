@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 import cloudpickle
 from typing import List, Dict, Callable, Tuple
-from sklearn.metrics import r2_score
 from keras.models import load_model
 from pandas_datareader import DataReader
 from timeseries_ml_utils.encoders import identity
@@ -116,6 +115,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
             raise ValueError('Not enough Data for given batch size of memory and window sizes: ' + str(self.length))
 
         # derived properties
+        # label identity decoders / encoders used for back testing of time-series
+        self.label_identity_encoders = [(col, identity) for _, (col, _) in enumerate(self.labels)]
+
         # we only know the shape (self.batch_size, self.lstm_memory_size, ??) but the number of features depend on the
         # encoder/decoder so we can not know them in advance
         item_zero = self[0]
@@ -255,53 +257,63 @@ class AbstractDataGenerator(keras.utils.Sequence):
 
     def back_test(self,
                   batch_predictor: Callable[[np.ndarray], np.ndarray],
-                  column_decoders: List[Tuple[str, Callable[[np.ndarray, float], np.ndarray]]] = None
-                  )-> BackTestHistory:
+                  column_decoders: List[Tuple[str, Callable[[np.ndarray, float], np.ndarray]]] = None,
+                  quality_measure: Callable[[np.ndarray, np.ndarray, np.ndarray], float] = get_r_squared,
+                  predict_labels: bool = True)-> BackTestHistory:
         length = len(self)
 
-        # make a prediction
-        batches = list(zip(*[self._back_test_batch(batch, batch_predictor, column_decoders)
+        # make a prediction for avery batch and zip all batches
+        batches = list(zip(*[self._back_test_batch(batch, batch_predictor, column_decoders, predict_labels)
                              for batch in range(length)]))
 
+        # disassemble the zipped batches to its column components
+        # shape: features, batch-size, 1, aggregation
         prediction = np.hstack(batches[0])
         labels = np.hstack(batches[1])
         errors = np.hstack(batches[2])
-        r_squares = np.hstack(batches[3])
-        reference_values = np.hstack(batches[4])
-        ref_index = [y for x in batches[5] for y in x]
+        reference_values = np.hstack(batches[3])
+        ref_index = [y for x in batches[4] for y in x]
+
+        # measure the quality of the prediction, this should allow a comparison between models
+        prediction_quality = np.reshape([quality_measure(labels[i], prediction[i], reference_values)
+                                         for i in np.ndindex(prediction.shape[:-1])], prediction.shape[:-1])
+
+        # # calculate an r2 for each batch and each lstm output sequence
+        # if errors.shape[-1] == 1:
+        #     # the best prediction we can do is use the reference value and we compare how much better we are
+        #     # for an r2 of 1 we want to be at least as close one percent of the error to the last value (ref value)
+        #     # r_squares = (1 - (errors / (labels - ref_values) ** 2))[:, :, -1]
+        #     r_squares = (1 - (errors / ((labels - ref_values) ** 2 * 0.01)))[:, :, -1]
+        # else:
+        #     r_squares = np.reshape([r2_score(labels[i], prediction[i]) for i in np.ndindex(prediction.shape[:-1])],
+        #                            prediction.shape[:-1])
 
         standard_deviations = np.array([errors[i, :, -1, j].std()
                                         for i in range(errors.shape[0]) for j in range(errors.shape[-1])])
 
         return BackTestHistory(self._get_column_names(self.labels), prediction, reference_values, ref_index, labels,
-                               r_squares, standard_deviations)
+                               prediction_quality, standard_deviations)
 
-    def _back_test_batch(self, i, batch_predictor, decoders=None):
+    def _back_test_batch(self, i, batch_predictor, decoders=None, predict_labels=True):
         # make a prediction
-        prediction, _, _, batch_ref_index = self._decode_batch(i, batch_predictor, decoders or self.labels)
+        prediction_enc_dec = decoders or self.labels
+        prediction, _, _, batch_ref_index = self._decode_batch(i, batch_predictor, prediction_enc_dec)
 
         # get the labels.
-        # Note that we do not want to encode the labels this time so we pass identity encoder and decoder
-        identity_encoders = [(col, identity) for _, (col, _) in enumerate(self.labels)]
-        labels, _, ref_values, _ = self._decode_batch(i, lambda _: self._get_labels_batch(i, identity_encoders)[0],
-                                                      identity_encoders)
+        # Note that we do not want to encode the labels if we try to predict them (so we pass identity en-/decoder)
+        # if we try to predict some encoding of labels i.e. classes we apply the same en-/decoder as for the prediction
+        label_enc_dec = self.label_identity_encoders if predict_labels else prediction_enc_dec
+        labels, _, ref_values, _ = self._decode_batch(i,
+                                                      lambda _: self._get_labels_batch(i, label_enc_dec)[0],
+                                                      label_enc_dec)
 
         # calculate errors between prediction and label per value
+        # this should even be correct for one hot encoded vectors
         errors = (prediction - labels) ** 2
 
-        # calculate an r2 for each batch and each lstm output sequence
-        if errors.shape[-1] == 1:
-            # the best prediction we can do is use the reference value and we compare how much better we are
-            # for an r2 of 1 we want to be at least as close only percent of the error to the last value (ref value)
-            # r_squares = (1 - (errors / (labels - ref_values) ** 2))[:, :, -1]
-            r_squares = (1 - (errors / ((labels - ref_values) ** 2 * 0.01)))[:, :, -1]
-        else:
-            r_squares = np.reshape([r2_score(labels[i], prediction[i]) for i in np.ndindex(prediction.shape[:-1])],
-                                   prediction.shape[:-1])
-
         # reshape the reference values
-        ref_values = ref_values.reshape(r_squares.shape)
-        return prediction, labels, errors, r_squares, ref_values, batch_ref_index
+        ref_values = ref_values.reshape(prediction.shape[:-1])
+        return prediction, labels, errors, ref_values, batch_ref_index
 
     def _decode_batch(self, i, predictor_function, decoding_functions):
         # get values
@@ -497,8 +509,9 @@ class DataGenerator(AbstractDataGenerator):
     def fit(self,
             model: keras.Model,
             fit_generator_args: Dict,
-            relative_accuracy_function: Callable[[np.ndarray, np.ndarray], float] = None,
-            frequency: int = 50,
+            quality_measure: Callable[[np.ndarray, np.ndarray, np.ndarray], float] = get_r_squared,
+            predict_labels: bool = True,
+            log_frequency: int = 50,
             log_dir: str = None) -> PredictiveDataGenerator:
 
         test_data = self.as_test_data_generator()
@@ -524,7 +537,7 @@ class DataGenerator(AbstractDataGenerator):
         model.save(self.model_filename + '.h5')
 
         # backtest model to get some statistics
-        back_test = test_data.back_test(model.predict)
+        back_test = test_data.back_test(model.predict, quality_measure=quality_measure, predict_labels=predict_labels)
 
         # save all data needed to do predictions and to reproduce the back test
         logging.info(f'save data model {self.model_filename }.dg')

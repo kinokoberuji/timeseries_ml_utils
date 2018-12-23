@@ -154,7 +154,7 @@ class Test_DataGenerator(TestCase):
         np.testing.assert_array_equal(features[-1, -1], decoded_batch[-1, -1, -1])
 
     def test_back_test_batch(self):
-        prediction, labels, errors, r_squares, reference_values, batch_ref_index = self.dg._back_test_batch(0, self.last_lstm_features_lambda, self.dg.labels)
+        prediction, labels, errors, reference_values, batch_ref_index = self.dg._back_test_batch(0, self.last_lstm_features_lambda, self.dg.labels)
         expected = labels[-1, -1, -1] - self.dg.forecast_horizon
         self.assertEqual(prediction.shape, labels.shape)
         np.testing.assert_array_equal(expected, prediction[-1, -1, -1])
@@ -165,7 +165,7 @@ class Test_DataGenerator(TestCase):
         last_batch_features, last_batch_labels = self.dg[self.dg.get_last_index()]
 
         # get the prediction where we just use the last set of features (window aggregated)
-        prediction, labels, r_squares, stds = self.dg.back_test(self.last_lstm_features_lambda).get_measures()
+        prediction, labels, qauality, stds = self.dg.back_test(self.last_lstm_features_lambda).get_measures()
 
         # the prediction and the labels need to ha the same shape (features, sample, lstm hist, aggregation window)
         # we need as many prediction s we have elements
@@ -183,6 +183,7 @@ class Test_DataGenerator(TestCase):
         # then the last value of any batch (first,, last) of features needs to equal the ref value of the prediction
         self.assertEqual(first_batch_features[0, -1, -1], prediction_ref[0, 0, 0, -1])
         self.assertEqual(last_batch_features[-1, -1, -1], prediction_ref[0, -1, 0, -1])
+        self.assertEqual((1, len(self.dg) * self.dg.batch_size, 1), qauality.shape)
 
     def test_variances(self):
         expected = [0., 0.06, 0.0714, 0.07378267, 0.07310571, 0.07111936, 0.06851887, 0.06563223, 0.06263179, 0.05961463,

@@ -1,6 +1,6 @@
 from typing import Union, Iterable, Dict, Tuple, List
-
 from pandas_ml import ConfusionMatrix
+from sklearn.metrics import r2_score
 from scipy.fftpack import dct
 from random import randint
 from fastdtw import fastdtw
@@ -58,6 +58,10 @@ def ascii_hist(x, bins):
         bar = '#'*int(n*1.0*width/nmax)
         xi = '{0: <8.4g}'.format(xi).ljust(10)
         print('{0}| {1}'.format(xi, bar))
+
+
+def get_r_squared(y: np.ndarray, y_hat: np.ndarray, _):
+    return r2_score(y, y_hat)
 
 
 def get_std_confidence_factor(confidence):
