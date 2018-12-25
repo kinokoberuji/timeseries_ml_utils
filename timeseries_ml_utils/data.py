@@ -275,8 +275,13 @@ class AbstractDataGenerator(keras.utils.Sequence):
         ref_index = [y for x in batches[4] for y in x]
 
         # measure the quality of the prediction, this should allow a comparison between models
-        prediction_quality = np.reshape([quality_measure(labels[i], prediction[i], reference_values)
-                                         for i in np.ndindex(prediction.shape[:-1])], prediction.shape[:-1])
+        try:
+            prediction_quality = np.reshape([quality_measure(labels[i], prediction[i], reference_values)
+                                             for i in np.ndindex(prediction.shape[:-1])], prediction.shape[:-1])
+        except ValueError as ve:
+            if "cannot reshape" in str(ve):
+                ve.message = ve.message + " are you sure about predicting labels (as time-series)?"
+            raise
 
         # # calculate an r2 for each batch and each lstm output sequence
         # if errors.shape[-1] == 1:
@@ -443,11 +448,11 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         loc_start = max(0, loc_end - self.lstm_memory_size)
         df_past = self.dataframe[columns][loc_start:loc_end]
 
-        # make a dataframe wor the prediction
+        # make a data-frame for the prediction
         z = get_std_confidence_factor(confidence)
-        y_hat = {col: prediction[i, -1] for i, col in enumerate(columns)}
-        lower = {f'{col}_lower': prediction[i, -1] - self.standard_deviations * z for i, col in enumerate(columns)}
-        upper = {f'{col}_upper': prediction[i, -1] + self.standard_deviations * z for i, col in enumerate(columns)}
+        y_hat = {f'predicted_{col}': prediction[i, -1] for i, col in enumerate(columns)}
+        lower = {f'predicted_{col}_lower': prediction[i, -1] - self.standard_deviations * z for i, col in enumerate(columns)}
+        upper = {f'predicted_{col}_upper': prediction[i, -1] + self.standard_deviations * z for i, col in enumerate(columns)}
         df_predict = pd.DataFrame({**y_hat, **lower, **upper},
                                   index=pd.date_range(start=df_past.index[-1], periods=prediction.shape[-1] + 1)[1:])
 

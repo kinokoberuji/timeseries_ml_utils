@@ -95,8 +95,9 @@ class Test_DataGenerator(TestCase):
 
         confusion_matrix = backtest.confusion_matrix()["Close"]
         print("Phi: {}".format(confusion_matrix.MCC))
-        # we would expect 16x16 but 3 cases never happened
-        self.assertEqual((13, 13), confusion_matrix.toarray().shape)
+
+        # by default we judge on the return of the last "day" of the prediction compared to the last reference value
+        self.assertEqual((2, 2), confusion_matrix.toarray().shape)
 
         hist = backtest.hist()["Close"]
         print("expected r2: {}".format(hist[1][np.argmax(hist[0])]))
@@ -138,8 +139,9 @@ class Test_DataGenerator(TestCase):
 
         confusion_matrix = backtest.confusion_matrix()["Close"]
         print("Phi: {}".format(confusion_matrix.MCC))
-        # we would expect 16x16 but 6 cases never happened
-        self.assertEqual((10, 10), confusion_matrix.toarray().shape)
+
+        # by default we judge on the return of the last "day" of the prediction compared to the last reference value
+        self.assertEqual((2, 2), confusion_matrix.toarray().shape)
 
         hist = backtest.hist()["Close"]
         print("expected r2: {}".format(hist[1][np.argmax(hist[0])]))
@@ -249,15 +251,18 @@ class Test_DataGenerator(TestCase):
                       "shuffle": False,
                       "verbose": 1}
 
-        fit = model_data.fit(model, train_args, quality_measure=lambda y, y_hat, _: abs(y_hat - y), predict_labels=False)
+        fit = model_data.fit(model, train_args, quality_measure=get_binary_error, predict_labels=False)
         back_test = fit.back_test_history
         last_backtest_date = back_test.reference_index[-1]
+        confusion = back_test.confusion_matrix(label_classifier=lambda val, _: int(val[-1]))['Close']
         prediction = fit.predict(-1)
 
+        self.assertTrue(back_test.labels.shape[1] >= back_test.labels.sum())
         self.assertEqual(len(data) - 1, data.index.get_loc(last_backtest_date) + model_data.forecast_horizon)
         np.testing.assert_array_equal([0, 1], back_test.hist(bins=1)['Close'][1])
+        np.testing.assert_array_equal([[0, 37], [0, 3]], confusion.toarray())
 
-        print("pred", prediction)
+        print("pred:\n", confusion)
 
     def test_scratch(self):
         data = self.df.iloc[-60:].copy()

@@ -1,4 +1,4 @@
-from typing import Union, Iterable, Dict, Tuple, List
+from typing import Union, Iterable, Dict, Tuple, List, Callable
 from pandas_ml import ConfusionMatrix
 from sklearn.metrics import r2_score
 from scipy.fftpack import dct
@@ -60,8 +60,15 @@ def ascii_hist(x, bins):
         print('{0}| {1}'.format(xi, bar))
 
 
+# quality functions
 def get_r_squared(y: np.ndarray, y_hat: np.ndarray, _):
-    return r2_score(y, y_hat)
+    return np.array(r2_score(y, y_hat))
+
+
+def get_binary_error(y: np.ndarray, y_hat: np.ndarray, _):
+    return np.array(abs(y_hat - y))
+
+# end of quality functions
 
 
 def get_std_confidence_factor(confidence):
@@ -93,7 +100,10 @@ class BackTestHistory(object):
     def get_measures(self):
         return self.predictions, self.labels, self.r_squares, self.standard_deviations
 
-    def confusion_matrix(self):
+    def confusion_matrix(self,
+                         label_classifier: Callable[[np.ndarray, np.ndarray], any] = lambda val, ref: 1 if val[-1] / ref[-1] > 1 else 0,
+                         prediction_classifier: Callable[[np.ndarray, np.ndarray], any] = None
+                         ) -> Dict[str, ConfusionMatrix]:
         nr_of_values = self.labels.shape[1]
         result = {}
 
@@ -103,10 +113,8 @@ class BackTestHistory(object):
             r = self.reference_values[i]
 
             # one way would be to count positive returns
-            y = [sum([f > 0 for f in l[j, -1] / r[j] - 1]) for j in range(nr_of_values)]
-            y_hat = [sum([f > 0 for f in p[j, -1] / r[j] - 1]) for j in range(nr_of_values)]
-
-            # another way would be bucketing
+            y = [label_classifier(l[j, -1], r[j]) for j in range(nr_of_values)]
+            y_hat = [(prediction_classifier or label_classifier)(p[j, -1], r[j]) for j in range(nr_of_values)]
 
             # finally calculate the confusion matrix
             result[label] = ConfusionMatrix(y, y_hat)
