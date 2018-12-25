@@ -61,12 +61,12 @@ def ascii_hist(x, bins):
 
 
 # quality functions
-def get_r_squared(y: np.ndarray, y_hat: np.ndarray, _):
-    return np.array(r2_score(y, y_hat))
+def get_r_squared(y: np.ndarray, y_hat: np.ndarray, _) -> float:
+    return r2_score(y, y_hat)
 
 
-def get_binary_error(y: np.ndarray, y_hat: np.ndarray, _):
-    return np.array(abs(y_hat - y))
+def get_binary_error(y: np.ndarray, y_hat: np.ndarray, _) -> float:
+    return abs(y_hat - y).sum()
 
 # end of quality functions
 

@@ -5,6 +5,7 @@ import io
 import os
 import os.path
 import re
+import sys
 import tempfile
 import uuid
 import keras
@@ -278,9 +279,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
         try:
             prediction_quality = np.reshape([quality_measure(labels[i], prediction[i], reference_values)
                                              for i in np.ndindex(prediction.shape[:-1])], prediction.shape[:-1])
-        except ValueError as ve:
-            if "cannot reshape" in str(ve):
-                ve.message = ve.message + " are you sure about predicting labels (as time-series)?"
+        except ValueError as e:
+            if "cannot reshape" in str(e):
+                raise type(e)(f'{e} are you sure about predicting labels (as time-series)?').with_traceback(sys.exc_info()[2])
             raise
 
         # # calculate an r2 for each batch and each lstm output sequence
@@ -439,6 +440,10 @@ class PredictiveDataGenerator(AbstractDataGenerator):
     # def back_test(self, batch_predictor: Callable[[np.ndarray], np.ndarray] = None):
     #    return super(PredictiveDataGenerator, self).back_test(batch_predictor or self.model.predict)
 
+    def feature_importance(self):
+        # TODO copy the data-frame, make all features zero except for one for each feature, sort by distance
+        pass
+
     def predict(self, i: int = -1, confidence=.80):
         prediction, index, ref_values, ref_index = self._predict(self.model.predict, i)
 
@@ -468,6 +473,26 @@ class PredictiveDataGenerator(AbstractDataGenerator):
 
 
 class DataGenerator(AbstractDataGenerator):
+    """ (Keras) Data Generator for time-series prediction. Note that the DataGeneator will automatically create
+        additional features like a sinusiodal time as well as adding an ewma based variance
+
+    # Arguments
+    dataframe: provide a pandas DataFrame but use the DataFetcher class to provide one
+    features: dictionary of regex keys matchng the dataframes columns. As value provide a encoding/decoding function
+        the form of (y, referece_value, is_encode). use this i.e. to normalize prices to returns or for FFT or such
+    labels: dictionary of regex keys matchng the dataframes columns. As value provide a encoding/decoding function
+        the form of (y, referece_value, is_encode). use this i.e. to normalize prices to returns or for FFT or such
+    batch_size: note that the batch size does generates baches apart for each other by 1 element!
+        As a conseuence a batch_size > 1 implicitly acts like an early epoch. For a bacht_size of 10 eache sample
+        will be shown 10 times to the network. For timeseries like stock prices this is can have a positive side effect.
+        we will use only 1 epoch ut a patch size of > 1
+    training_percentage: split the data frame into test and valuation size
+    return_sequences: whether to return the memory as well or not (typically not)
+    variances: ictionary of regex keys matchng the dataframes columns. As value provide a lambda factor which is used
+        by the ewma variance calculation which will be added for each column of te data frame as part of the
+        feature enginering.
+    model_path: path where to safe the model after training
+    """
 
     def __init__(self,
                  dataframe,  # FIXME provide a DataFetcher and use a classmethod on the DataFetcher instead
@@ -519,6 +544,19 @@ class DataGenerator(AbstractDataGenerator):
             log_frequency: int = 50,
             log_dir: str = None) -> PredictiveDataGenerator:
 
+        """ Fit the model using keras fit function
+
+        # Arguments
+            model: the keras model
+            fit_generator_args: arguments to pass to keras fit function as well as to the keras DataGeneator
+                (i.e. "use_multiprocessing": True, "workers": 4, "shuffle": False). Note make sure you always pass
+                shuffel: False!
+            quality_measure: a function (y, y_hat, reference_value) whc returns a single quality measure. In case of
+                timeseries prediction we use the r squared as the model quality measure
+            predict_labels: wheter you try to predict the labels (or a time series like price) or something else like
+                classes (i.e. next window will trend up/down)
+        """
+
         test_data = self.as_test_data_generator()
 
         callbacks = [
@@ -531,6 +569,7 @@ class DataGenerator(AbstractDataGenerator):
         fit_generator_args["callbacks"] = callbacks + fit_generator_args.get("callbacks", [])
 
         # train the neural network using keras
+        print("train ...")
         hist = model.fit_generator(**fit_generator_args)
 
         # convert history callbacks into data frames
@@ -542,6 +581,7 @@ class DataGenerator(AbstractDataGenerator):
         model.save(self.model_filename + '.h5')
 
         # backtest model to get some statistics
+        print("back test ...")
         back_test = test_data.back_test(model.predict, quality_measure=quality_measure, predict_labels=predict_labels)
 
         # save all data needed to do predictions and to reproduce the back test
@@ -562,4 +602,5 @@ class DataGenerator(AbstractDataGenerator):
             ], f)
 
         # return a re-usable predictive data generator
+        print("done!")
         return PredictiveDataGenerator(self.model_path, test_data.dataframe)
