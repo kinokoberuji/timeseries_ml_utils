@@ -1,6 +1,12 @@
-from typing import Callable
+from typing import Callable, Union
 
 import numpy as np
+
+
+def one_hot_vector(shape: Union[int, np.ndarray], hot: int) -> np.ndarray:
+    zeros = np.zeros_like(shape) if isinstance(shape, np.ndarray) else np.zeros(shape)
+    zeros[hot] = 1.0
+    return zeros
 
 
 def batch_predictor_from(predictor: Callable[[np.ndarray], np.ndarray]) -> Callable[[np.ndarray], np.ndarray]:

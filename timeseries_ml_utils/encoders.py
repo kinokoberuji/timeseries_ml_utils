@@ -77,3 +77,25 @@ def normalize(x, ref_value, is_encode):
     else:
         return (x + 1) * ref_value
 
+
+def log_returns(x, ref_value, is_encode):
+    if is_encode:
+        ref = np.hstack([[ref_value], x[:-1]])
+        return np.log(x / ref)
+    else:
+        ret = np.exp(x)
+        res = []
+
+        for i in range(len(ret)):
+            res.append((res[i-1] if i > 0 else ref_value) * ret[i])
+
+        return np.array(res)
+
+
+# classify candles
+def candle_classify(x, ref_value, is_encode):
+    # one hot encoding [open is higher as last close,
+    #                   candle is positive,
+    #                   upper shade is bigger as body,
+    #                   lower shade is bigger as body]
+    pass

@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import cloudpickle
 from typing import List, Dict, Callable, Tuple
+
+from keras.callbacks import EarlyStopping
 from keras.models import load_model
 from pandas_datareader import DataReader
 from timeseries_ml_utils.encoders import identity
@@ -38,7 +40,7 @@ class DataFetcher:
             os.remove(self.file_name)
 
     def fetch_data(self):
-        df = pd.concat([DataReader(symbol, self.data_source).add_prefix(symbol + ".") for symbol in self.symbols],
+        df = pd.concat([self._fetch_data(symbol, self.data_source).add_prefix(symbol + ".") for symbol in self.symbols],
                        axis=1,
                        join='inner') \
                .sort_index()
@@ -50,6 +52,14 @@ class DataFetcher:
 
         df.to_hdf(self.file_name, key=self.df_key, mode='w')
         return df
+
+    def _fetch_data(self, symbol, data_source):
+        df = DataReader(symbol, data_source)
+
+        if len(df) <= 0:
+            raise ValueError(f'No data found for symbol {symbol} @ {data_source}')
+
+        return df;
 
     def get_dataframe(self) -> pd.DataFrame:
         if not os.path.isfile(self.file_name):
@@ -70,11 +80,13 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def __init__(self,
                  dataframe: pd.DataFrame,
                  features: List[Tuple[str, Callable]],
+                 feature_group_encoder: Callable[[np.ndarray], np.ndarray],
                  labels: List[Tuple[str, Callable]],
+                 label_group_encoder: Callable[[np.ndarray], np.ndarray],
                  batch_size: int,
                  lstm_memory_size: int,
                  aggregation_window_size: int,
-                 forecast_horizon :int,
+                 forecast_horizon: int,
                  training_percentage: float,
                  return_sequences: bool,
                  variances: List[Tuple[str, float]],
@@ -85,7 +97,9 @@ class AbstractDataGenerator(keras.utils.Sequence):
         self.shuffle = False
         self.dataframe = self._add_sinusoidal_time(self._add_ewma_variance(dataframe, variances)).dropna()
         self.features = features
+        self.feature_group_encoder = feature_group_encoder
         self.labels = labels
+        self.label_group_encoder = label_group_encoder
         self.batch_size = batch_size
         self.lstm_memory_size = lstm_memory_size
         self.aggregation_window_size = aggregation_window_size
@@ -171,10 +185,25 @@ class AbstractDataGenerator(keras.utils.Sequence):
         labels_batch, _ = self._get_labels_batch(i, self.labels)
         return features_batch, labels_batch
 
-    def _get_features_batch(self, i, encoders=None):
+    def _get_batch_indices(self):
+        i = 0
+        last = len(self) - self.batch_size
+
+        while True:
+            if i > last:
+                if i - last < self.batch_size:
+                    yield (last, self.batch_size - (i - last))
+                break
+            else:
+                yield (i, self.batch_size)
+                i += self.batch_size
+
+    def _get_features_batch(self, i, encoders=None, group_encoder=None):
         # offset index if test set
         features_loc = self._get_features_loc(i)
-        features, index = self._build_matrix(features_loc, features_loc, encoders or self.features, True)
+        encoder = encoders or self.features
+        group_encoder = group_encoder or self.feature_group_encoder
+        features, index = self._build_matrix(features_loc, features_loc, encoder, True, group_encoder)
         return features, index
 
     def _get_features_loc(self, i):
@@ -183,17 +212,19 @@ class AbstractDataGenerator(keras.utils.Sequence):
     def _get_end_of_features_loc(self, i):
         return self._get_features_loc(i) + self.aggregation_window_size
 
-    def _get_labels_batch(self, i, encoders=None):
+    def _get_labels_batch(self, i, encoders=None, group_encoder=None):
         # offset index if test set
         labels_loc = self._get_labels_loc(i)
         ref_loc = self._get_end_of_features_loc(i)
-        labels, index = self._build_matrix(labels_loc, ref_loc, encoders or self.labels, self.return_sequences)
+        encoder = encoders or self.labels
+        group_encoder = group_encoder or self.label_group_encoder
+        labels, index = self._build_matrix(labels_loc, ref_loc, encoder, self.return_sequences, group_encoder)
         return labels, index
 
     def _get_labels_loc(self, i):
         return self._get_features_loc(i) + self.forecast_horizon
 
-    def _build_matrix(self, loc, ref_loc, column_encoders, is_lstm_aggregate):
+    def _build_matrix(self, loc, ref_loc, column_encoders, is_lstm_aggregate, group_encoder=lambda x, _: x):
         # aggregate windows
         # shape = ((feature/label_columns, lstm_memory_size + batch_size, window), ...)
         matrix, index = self._aggregate_window(loc, AbstractDataGenerator._get_column_names(column_encoders))
@@ -202,7 +233,7 @@ class AbstractDataGenerator(keras.utils.Sequence):
         ref_values, ref_index = self._get_reference_values(ref_loc, self._get_column_names(column_encoders))
 
         # encode data like normalization
-        matrix = self._encode(matrix, ref_values, column_encoders)
+        matrix = self._encode(matrix, ref_values, column_encoders, group_encoder)
 
         # make sliding window of lstm_memory_size
         # shape = (batchsize, lstm_memory_size, window * feature/label_columns)
@@ -241,10 +272,10 @@ class AbstractDataGenerator(keras.utils.Sequence):
         ref_values = np.stack(ref_values, axis=0)
         return ref_values, ref_index
 
-    def _encode(self, aggregate_matrix, reference_values, encoding_functions):
+    def _encode(self, aggregate_matrix, reference_values, encoding_functions, whole_row_encoder=lambda x, _: x):
 
-        encoded = np.array([np.hstack([func(aggregate_matrix[i, row], reference_values[i, row], True)
-                                       for i, (col, func) in enumerate(encoding_functions)])
+        encoded = np.array([whole_row_encoder(np.hstack([func(aggregate_matrix[i, row], reference_values[i, row], True)
+                                                         for i, (col, func) in enumerate(encoding_functions)]), True)
                             for row in (range(aggregate_matrix.shape[1]))])
 
         return encoded
@@ -264,6 +295,8 @@ class AbstractDataGenerator(keras.utils.Sequence):
         length = len(self)
 
         # make a prediction for avery batch and zip all batches
+        # [self._back_test_batch(batch, batch_predictor, column_decoders, predict_labels)[:samples]
+        #  for batch, samples in self._get_batch_indices()]
         batches = list(zip(*[self._back_test_batch(batch, batch_predictor, column_decoders, predict_labels)
                              for batch in range(length)]))
 
@@ -352,10 +385,12 @@ class AbstractDataGenerator(keras.utils.Sequence):
         batch_ref_index = [ref_index[i + self.lstm_memory_size - 1] for i in range(self.batch_size)]
         return np.stack(batch_ref_values, axis=0), batch_ref_index
 
-    def _decode(self, vector, reference_values, decoding_functions):
-        # first reshape a 1D vector into (nr of labels, 1, aggregation window)
-        # fixme the hard coded 1 is wrong if self.return_sequences
-        decoded = vector.reshape((len(self.labels), 1, -1))
+    def _decode(self, vector, reference_values, decoding_functions, whole_row_decoder=lambda x, _: x):
+        # first apply a potentially label group decoding
+        decoded = whole_row_decoder(vector, False)
+
+        # then reshape data into a 1D vector of shape (nr of labels, 1, aggregation window)
+        decoded = decoded.reshape((len(self.labels), 1 if not self.return_sequences else self.lstm_memory_size, -1))
 
         # now we can decode each row of each column with its associated decoder
         decoded = np.stack([np.array([func(decoded[i, row], reference_values[i, row], False)
@@ -387,7 +422,9 @@ class TestDataGenerator(AbstractDataGenerator):
     def __init__(self, data_generator, training_percentage: float = None):
         super(TestDataGenerator, self).__init__(data_generator.dataframe,
                                                 data_generator.features,
+                                                data_generator.feature_group_encoder,
                                                 data_generator.labels,
+                                                data_generator.label_group_encoder,
                                                 data_generator.batch_size,
                                                 data_generator.lstm_memory_size,
                                                 data_generator.aggregation_window_size,
@@ -413,14 +450,16 @@ class PredictiveDataGenerator(AbstractDataGenerator):
 
         super(PredictiveDataGenerator, self).__init__(data_fetcher,  # getDataFrame
                                                       pickles[3],   # features
-                                                      pickles[4],   # labels
-                                                      pickles[5],   # batch_size
-                                                      pickles[6],   # lstm_memory_size
-                                                      pickles[7],   # aggregation_window_size
-                                                      pickles[8],   # forecast_horizon
+                                                      pickles[4],   # feature_group_encoder
+                                                      pickles[5],   # labels
+                                                      pickles[6],   # label group encoder
+                                                      pickles[7],   # batch_size
+                                                      pickles[8],   # lstm_memory_size
+                                                      pickles[9],   # aggregation_window_size
+                                                      pickles[10],  # forecast_horizon
                                                       1.0,
-                                                      pickles[9],   # return_sequences
-                                                      pickles[10],  # variances
+                                                      pickles[11],  # return_sequences
+                                                      pickles[12],  # variances
                                                       False)
 
         self.model = load_model(self.model_file_name + '.h5')
@@ -444,8 +483,11 @@ class PredictiveDataGenerator(AbstractDataGenerator):
         # TODO copy the data-frame, make all features zero except for one for each feature, sort by distance
         pass
 
+    def predict_raw(self, i: int = -1):
+        return self._predict(self.model.predict, i)
+
     def predict(self, i: int = -1, confidence=.80):
-        prediction, index, ref_values, ref_index = self._predict(self.model.predict, i)
+        prediction, index, ref_values, ref_index = self.predict_raw(i)
 
         # get all the past data from the data frame from past lstm_memorysize rows
         columns = self._get_column_names(self.labels)
@@ -478,19 +520,22 @@ class DataGenerator(AbstractDataGenerator):
 
     # Arguments
     dataframe: provide a pandas DataFrame but use the DataFetcher class to provide one
-    features: dictionary of regex keys matchng the dataframes columns. As value provide a encoding/decoding function
-        the form of (y, referece_value, is_encode). use this i.e. to normalize prices to returns or for FFT or such
-    labels: dictionary of regex keys matchng the dataframes columns. As value provide a encoding/decoding function
-        the form of (y, referece_value, is_encode). use this i.e. to normalize prices to returns or for FFT or such
+    features: dictionary of regex keys matchnig the data-frames columns. As value provide a encoding/decoding function
+        the form of (y, reference_value, is_encode). use this i.e. to normalize prices to returns or for FFT or such
+    labels: dictionary of regex keys matching the data-frames columns. As value provide a encoding/decoding function
+        the form of (y, reference_value, is_encode). use this i.e. to normalize prices to returns or for FFT or such
     batch_size: note that the batch size does generates baches apart for each other by 1 element!
-        As a conseuence a batch_size > 1 implicitly acts like an early epoch. For a bacht_size of 10 eache sample
-        will be shown 10 times to the network. For timeseries like stock prices this is can have a positive side effect.
+        As a consequence a batch_size > 1 implicitly acts like an early epoch. For a bach-size of 10 each sample
+        will be shown 10 times to the network. For time-series like stock prices this is can have a positive side effect.
         we will use only 1 epoch ut a patch size of > 1
+    feature_group_encoding/feature_group_encoding: allows a lambda to be passed to encoder/decode the final vector.
+        This is useful for top / flop encoding - i.e. all DJI close prces will be encoded to returns and then group
+        encoded to be 1 for the highest return 0 otherwise
     training_percentage: split the data frame into test and valuation size
     return_sequences: whether to return the memory as well or not (typically not)
-    variances: ictionary of regex keys matchng the dataframes columns. As value provide a lambda factor which is used
+    variances: dictionary of regex keys matching the data-frames columns. As value provide a lambda factor which is used
         by the ewma variance calculation which will be added for each column of te data frame as part of the
-        feature enginering.
+        feature engineering.
     model_path: path where to safe the model after training
     """
 
@@ -498,6 +543,8 @@ class DataGenerator(AbstractDataGenerator):
                  dataframe,  # FIXME provide a DataFetcher and use a classmethod on the DataFetcher instead
                  features: Dict[str, Callable[[np.ndarray, float, bool], np.ndarray]],
                  labels: Dict[str, Callable[[np.ndarray, float, bool], np.ndarray]],
+                 feature_group_encoding: Callable[[np.ndarray], np.ndarray] = lambda f, _: f,
+                 label_group_encoding: Callable[[np.ndarray], np.ndarray] = lambda l, _: l,
                  batch_size: int = 100, lstm_memory_size: int = 52 * 5, aggregation_window_size: int = 32, forecast_horizon: int = None,
                  training_percentage: float = 0.8,
                  return_sequences: bool = False,
@@ -513,7 +560,9 @@ class DataGenerator(AbstractDataGenerator):
 
         super(DataGenerator, self).__init__(dataframe,
                                             [(col, r) for col in columns for f, r in features.items() if re.search(f, col)],
+                                            feature_group_encoding,
                                             [(col, r) for col in columns for l, r in labels.items() if re.search(l, col)],
+                                            label_group_encoding,
                                             batch_size,
                                             lstm_memory_size,
                                             aggregation_window_size,
@@ -551,7 +600,7 @@ class DataGenerator(AbstractDataGenerator):
             fit_generator_args: arguments to pass to keras fit function as well as to the keras DataGeneator
                 (i.e. "use_multiprocessing": True, "workers": 4, "shuffle": False). Note make sure you always pass
                 shuffel: False!
-            quality_measure: a function (y, y_hat, reference_value) whc returns a single quality measure. In case of
+            quality_measure: a function (y, y_hat, reference_value) which returns a single quality measure. In case of
                 timeseries prediction we use the r squared as the model quality measure
             predict_labels: wheter you try to predict the labels (or a time series like price) or something else like
                 classes (i.e. next window will trend up/down)
@@ -560,7 +609,8 @@ class DataGenerator(AbstractDataGenerator):
         test_data = self.as_test_data_generator()
 
         callbacks = [
-            BatchHistory()
+            BatchHistory(),
+            # EmergencyStop(),
             # FIXME callback = RelativeAccuracy(test_data, relative_accuracy_function, frequency, log_dir or self.model_path + logs)
         ]
 
@@ -569,7 +619,7 @@ class DataGenerator(AbstractDataGenerator):
         fit_generator_args["callbacks"] = callbacks + fit_generator_args.get("callbacks", [])
 
         # train the neural network using keras
-        print("train ...")
+        print(f'train with plugins {fit_generator_args["callbacks"]} ...')
         hist = model.fit_generator(**fit_generator_args)
 
         # convert history callbacks into data frames
@@ -592,7 +642,9 @@ class DataGenerator(AbstractDataGenerator):
                 batch_hist,
                 back_test.get_all_fields(),
                 self.features,
+                self.feature_group_encoder,
                 self.labels,
+                self.label_group_encoder,
                 self.batch_size,
                 self.lstm_memory_size,
                 self.aggregation_window_size,

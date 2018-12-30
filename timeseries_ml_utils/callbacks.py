@@ -1,13 +1,15 @@
 import itertools as it
 import math
+import os
 from datetime import datetime
 from shutil import rmtree
 
 import numpy as np
+import uuid
 from keras import backend as K
 from keras.callbacks import Callback, History
 from matplotlib import pyplot as plt
-
+from sys import modules
 from .statistics import ascii_hist, relative_dtw
 from .tensorboard import TensorboardLogger
 
@@ -22,6 +24,37 @@ class BatchHistory(Callback):
         self.batch.append(batch)
         for k, v in logs.items():
             self.history.setdefault(k, []).append(v)
+
+        # if 'IPython.display' in modules:
+        #     import pylab as pl
+        #     from IPython import display
+        #
+        #     pl.plot(self.history['loss'])
+        #     pl.title("loss")
+        #     display.display(pl.gcf())
+        #     display.clear_output(wait=True)
+
+
+class EmergencyStop(Callback):
+
+    def __init__(self):
+        super(EmergencyStop, self).__init__()
+        self.emergency_file = f'/tmp/{uuid.uuid4()}'
+        print(f'to emergency stop training create file: {self.emergency_file}')
+
+    def on_batch_end(self, batch, logs=None):
+        self.on_epoch_end(-1, logs)
+
+    def on_epoch_end(self, epoch, logs=None):
+        try:
+            if os.path.isfile(self.emergency_file):
+                print("found stop file, stopping training")
+                self.model.stop_training = True
+        except:
+            pass
+
+    def on_train_end(self, logs=None):
+        print("training ended")
 
 
 class RelativeAccuracy(Callback):

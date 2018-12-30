@@ -16,10 +16,12 @@ class TestTestDataGenerator(TestCase):
             "GLD.US.Volume": np.arange(19.0)
         }, index=pd.date_range(start='01.01.2015', periods=19))
 
-
         # test case
-        data_generator = DataGenerator(df, {"GLD.US.Close$": identity, "GLD.US.Volume$": identity}, {"GLD.US.Close$": identity},
-                                       3, 4, 5, training_percentage=0.6, return_sequences=False)
+        data_generator = DataGenerator(df,
+                                       {"GLD.US.Close$": identity, "GLD.US.Volume$": identity},
+                                       {"GLD.US.Close$": identity},
+                                       batch_size=3, lstm_memory_size=4, aggregation_window_size=5,
+                                       training_percentage=0.6, return_sequences=False)
 
         model = Sequential()
         model.add(LSTM(data_generator.batch_label_shape[-1],

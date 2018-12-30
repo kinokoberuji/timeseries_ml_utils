@@ -199,7 +199,7 @@ class Test_DataGenerator(TestCase):
         self.assertEqual(model_data.variances, fit.variances)
 
     def test_prediction(self):
-        model_path = os.path.join(self.path, "resources", "2018-12-19-18-26-31-f6a6989b-4b85-453a-a7e7-d85d3aee8a44")
+        model_path = os.path.join(self.path, "resources", "2018-12-30-13-32-59-0cfa5f4d-4922-4322-b48e-0afa97034f48")
         predictor = PredictiveDataGenerator(model_path, self.df)
         prediction = predictor.predict()
         self.assertTrue(True)

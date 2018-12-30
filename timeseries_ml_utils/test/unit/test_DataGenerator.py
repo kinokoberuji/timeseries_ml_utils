@@ -1,3 +1,4 @@
+import math
 import traceback
 import unittest
 from unittest import TestCase
@@ -34,6 +35,11 @@ class Test_DataGenerator(TestCase):
             self.dg_test = self.dg.as_test_data_generator(0.5)
 
         self.last_lstm_features_lambda = lambda x: x[:, -1, -self.dg.aggregation_window_size * len(self.dg.labels):]
+
+    def test_get_batch_indices(self):
+        indices = [x for _, x in self.dg._get_batch_indices()]
+        self.assertEqual(math.ceil(len(self.dg) / self.dg.batch_size), len(indices))
+        self.assertEqual(len(self.dg), sum(indices))
 
     def test_len(self):
         labels_batch, labels_index_batch = self.dg._get_labels_batch(self.dg.get_last_index())
