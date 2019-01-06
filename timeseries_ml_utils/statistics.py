@@ -102,9 +102,14 @@ class BackTestHistory(object):
 
     def confusion_matrix(self,
                          label_classifier: Callable[[np.ndarray, np.ndarray], any] = lambda val, ref: 1 if val[-1] / ref[-1] > 1 else 0,
-                         prediction_classifier: Callable[[np.ndarray, np.ndarray], any] = None
+                         prediction_classifier: Callable[[np.ndarray, np.ndarray], any] = None,
+                         label_group_classifier: Callable[[np.ndarray], any] = lambda x: x,
+                         prediction_group_classifier: Callable[[np.ndarray], any] = None
                          ) -> Dict[str, ConfusionMatrix]:
+
         nr_of_values = self.labels.shape[1]
+        group_y_hat = []
+        group_y = []
         result = {}
 
         for i, label in enumerate(self.column_names):
@@ -112,12 +117,27 @@ class BackTestHistory(object):
             p = self.predictions[i]
             r = self.reference_values[i]
 
-            # one way would be to count positive returns
+            # classify single labels
             y = [label_classifier(l[j, -1], r[j]) for j in range(nr_of_values)]
             y_hat = [(prediction_classifier or label_classifier)(p[j, -1], r[j]) for j in range(nr_of_values)]
 
             # finally calculate the confusion matrix
-            result[label] = ConfusionMatrix(y, y_hat)
+            try:
+                result[label] = ConfusionMatrix(y, y_hat)
+            except Exception as e:
+                result[label] = str(e)
+
+            group_y_hat.append(y_hat)
+            group_y.append(y)
+
+        # group classify labels
+        try:
+            result["__GROUP__"] = ConfusionMatrix(
+                label_group_classifier(np.array(group_y)),
+                (prediction_group_classifier or label_group_classifier)(np.array(group_y_hat))
+            )
+        except Exception as e:
+            result["__GROUP__"] = str(e)
 
         return result
 

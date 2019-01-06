@@ -14,6 +14,7 @@ import pandas as pd
 import cloudpickle
 from typing import List, Dict, Callable, Tuple
 
+import validators
 from keras.callbacks import EarlyStopping
 from keras.models import load_model
 from pandas_datareader import DataReader
@@ -54,12 +55,15 @@ class DataFetcher:
         return df
 
     def _fetch_data(self, symbol, data_source):
-        df = DataReader(symbol, data_source)
+        if not validators.url(data_source):
+            df = DataReader(symbol, data_source)
+        else:
+            df = pd.read_csv(data_source.format(symbol))
 
         if len(df) <= 0:
             raise ValueError(f'No data found for symbol {symbol} @ {data_source}')
 
-        return df;
+        return df
 
     def get_dataframe(self) -> pd.DataFrame:
         if not os.path.isfile(self.file_name):

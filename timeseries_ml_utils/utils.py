@@ -1,6 +1,8 @@
+import math
 from typing import Callable, Union
 
 import numpy as np
+import pandas as pd
 
 
 def one_hot_vector(shape: Union[int, np.ndarray], hot: int) -> np.ndarray:
@@ -14,6 +16,19 @@ def batch_predictor_from(predictor: Callable[[np.ndarray], np.ndarray]) -> Calla
         return np.stack([predictor(sample) for sample in batch], axis=0)
 
     return predict_batch
+
+
+def ewma_variance(s: pd.Series, l=.94) -> pd.Series:
+    arr = s.pct_change().values
+    all_var = []
+    var = 0
+
+    for i in range(len(arr)):
+        v = l * var + (1 - l) * arr[i] ** 2
+        var = 0 if math.isnan(v) or math.isinf(v) else v
+        all_var.append(var)
+
+    return pd.Series(all_var, index=s.index[1:])
 
 
 sinusoidal_time_calculators = {

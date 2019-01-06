@@ -12,3 +12,5 @@ scipy
 tables
 matplotlib
 pandas-datareader
+validators
+gym
